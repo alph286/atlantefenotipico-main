@@ -1,0 +1,1363 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#06141b">
+  <title>Atlante Fenotipico di Comunità</title>
+  <style>
+    :root {
+      --bg:      #06141b;
+      --teal:    #2596be;
+      --lime:    #d9f800;
+      --magenta: #ee15ef;
+      --red:     #f50508;
+      --ink:     #eafbff;
+      /* tinte derivate */
+      --teal-12: rgba(37,150,190,.12);
+      --teal-22: rgba(37,150,190,.22);
+      --teal-40: rgba(37,150,190,.40);
+      --teal-70: rgba(37,150,190,.70);
+      --ink-35:  rgba(234,251,255,.35);
+      --ink-55:  rgba(234,251,255,.55);
+    }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      background: var(--bg);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      -webkit-tap-highlight-color: transparent;
+    }
+    button { font-family: inherit; }
+    :focus-visible {
+      outline: 2px solid var(--lime);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+
+    /* ── Canvas ───────────────────────────────────────── */
+    #c {
+      position: fixed; inset: 0;
+      display: block;
+      cursor: grab;
+    }
+    #c.grabbing  { cursor: grabbing;  }
+    #c.zoomin    { cursor: zoom-in;   }
+    #c.zoomout   { cursor: zoom-out;  }
+
+    /* ── Vignette ─────────────────────────────────────── */
+    #vignette {
+      position: fixed; inset: 0;
+      pointer-events: none; z-index: 2;
+      background: radial-gradient(
+        ellipse 80% 60% at 50% 50%,
+        transparent 30%,
+        rgba(6,20,27,.55) 80%,
+        rgba(6,20,27,.85) 100%
+      );
+      transition: opacity 0.5s ease;
+    }
+    #vignette.dimmed { opacity: 0.15; }   /* quasi sparisce quando zoommati */
+
+    /* ── Loading ──────────────────────────────────────── */
+    #loading {
+      position: fixed; inset: 0; z-index: 200;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: #06141b;
+      transition: opacity 0.9s ease;
+    }
+    #loading.fade-out { opacity: 0; pointer-events: none; }
+    .ld-title {
+      font-size: clamp(.85rem, 2.5vw, 1.25rem);
+      font-weight: 300; letter-spacing: .45em;
+      text-transform: uppercase;
+      color: #d9f800;
+      margin-bottom: 2.4rem;
+    }
+    .ld-bar-wrap {
+      width: min(260px, 55vw); height: 1px;
+      background: rgba(37,150,190,.18); overflow: hidden;
+    }
+    .ld-bar {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, #2596be, #ee15ef 55%, #d9f800);
+      transition: width .2s linear;
+    }
+    .ld-info {
+      margin-top: 1.1rem; font-size: .62rem;
+      letter-spacing: .22em; text-transform: uppercase;
+      color: rgba(37,150,190,.6);
+    }
+
+    /* ════════ Chrome: barre con scrim (entrano dopo il load) ════════ */
+    #topbar, #deck {
+      position: fixed; left: 0; right: 0; z-index: 10;
+      display: flex; align-items: center;
+      padding: 0 clamp(1rem, 4vw, 2.4rem);
+      opacity: 0; pointer-events: none;
+      transition: opacity .7s ease, transform .7s ease;
+    }
+    body.ready #topbar, body.ready #deck { opacity: 1; pointer-events: auto; }
+
+    /* ── Barra superiore ── */
+    #topbar {
+      top: 0; height: 64px; justify-content: space-between;
+      transform: translateY(-14px);
+      background: linear-gradient(180deg, rgba(6,20,27,.82) 0%, rgba(6,20,27,0) 100%);
+      border-bottom: 1px solid var(--teal-22);
+    }
+    body.ready #topbar { transform: translateY(0); }
+    .brand { display: flex; flex-direction: column; gap: .18rem; line-height: 1; }
+    .brand-mark {
+      font-size: clamp(.72rem, 1.7vw, .92rem); font-weight: 600;
+      letter-spacing: .34em; text-transform: uppercase; color: var(--ink);
+    }
+    .brand-mark em {
+      font-style: normal; font-weight: 400; color: var(--lime);
+      letter-spacing: .28em;
+    }
+    .brand-sub {
+      font-size: .54rem; letter-spacing: .3em; text-transform: uppercase;
+      color: var(--teal-70);
+    }
+    #help-btn {
+      width: 34px; height: 34px; flex: none;
+      background: var(--teal-12); border: 1px solid var(--teal-40);
+      border-radius: 50%; color: var(--teal); font-size: .95rem;
+      cursor: pointer; transition: background .2s, color .2s, border-color .2s, box-shadow .2s;
+    }
+    #help-btn:hover {
+      background: rgba(217,248,0,.14); color: var(--lime);
+      border-color: rgba(217,248,0,.5); box-shadow: 0 0 16px rgba(217,248,0,.25);
+    }
+
+    /* ── Deck inferiore ── */
+    #deck {
+      bottom: 0; height: 78px; justify-content: center; gap: 1rem;
+      transform: translateY(14px);
+      background: linear-gradient(0deg, rgba(6,20,27,.85) 0%, rgba(6,20,27,0) 100%);
+      border-top: 1px solid var(--teal-22);
+    }
+    body.ready #deck { transform: translateY(0); }
+
+    /* stepper (‹ ›) e nav dettaglio: stile condiviso */
+    .deck-step, .deck-nav, #det-close, #det-flip {
+      flex: none; height: 40px; min-width: 40px; padding: 0 .6rem;
+      display: flex; align-items: center; justify-content: center; gap: .4rem;
+      background: var(--teal-12); border: 1px solid var(--teal-40);
+      border-radius: 999px; color: var(--teal); font-size: 1.2rem; line-height: 1;
+      cursor: pointer; user-select: none; -webkit-user-select: none;
+      transition: background .18s, color .18s, border-color .18s, box-shadow .18s;
+    }
+    .deck-step:hover, #det-close:hover {
+      background: rgba(217,248,0,.14); color: var(--lime);
+      border-color: rgba(217,248,0,.5); box-shadow: 0 0 16px rgba(217,248,0,.22);
+    }
+    .deck-nav:hover {
+      background: rgba(238,21,239,.16); color: var(--magenta);
+      border-color: rgba(238,21,239,.5); box-shadow: 0 0 16px rgba(238,21,239,.22);
+    }
+    /* pulsante "Gira": azione primaria del dettaglio (lime) */
+    #det-flip {
+      background: rgba(217,248,0,.12); border-color: rgba(217,248,0,.45);
+      color: var(--lime); font-size: 1.15rem;
+    }
+    #det-flip span {
+      font-size: .55rem; letter-spacing: .18em; text-transform: uppercase;
+    }
+    #det-flip:hover {
+      background: rgba(217,248,0,.2);
+      border-color: rgba(217,248,0,.7); box-shadow: 0 0 18px rgba(217,248,0,.35);
+    }
+
+    /* ── Modalità normale: scrubber ── */
+    .deck-browse {
+      display: flex; align-items: center; gap: .9rem;
+      width: min(680px, 80vw);
+    }
+    #scrubber {
+      position: relative; flex: 1 1 auto; height: 24px; cursor: pointer;
+      display: flex; align-items: center;
+    }
+    #scrubber::before {           /* binario */
+      content: ''; position: absolute; left: 0; right: 0; top: 50%;
+      height: 2px; transform: translateY(-50%);
+      background: var(--teal-22); border-radius: 2px;
+    }
+    #scrub-fill {
+      position: absolute; left: 0; top: 50%; height: 2px;
+      transform: translateY(-50%); width: 0;
+      background: linear-gradient(90deg, var(--teal), var(--lime));
+      border-radius: 2px; pointer-events: none;
+    }
+    #scrub-knob {
+      position: absolute; top: 50%; left: 0;
+      width: 14px; height: 14px; margin-left: -7px;
+      transform: translateY(-50%);
+      background: var(--lime); border-radius: 50%;
+      box-shadow: 0 0 0 4px rgba(217,248,0,.12);
+      transition: box-shadow .18s, transform .08s; pointer-events: none;
+    }
+    #scrubber:hover #scrub-knob, #scrubber.dragging #scrub-knob {
+      box-shadow: 0 0 0 6px rgba(217,248,0,.22), 0 0 18px rgba(217,248,0,.4);
+    }
+    #scrubber.disabled { opacity: .35; pointer-events: none; }
+
+    /* ── Modalità dettaglio (zoom) ── */
+    .deck-detail { display: none; align-items: center; gap: 1rem; }
+    body.zoomed .deck-browse { display: none; }
+    body.zoomed .deck-detail { display: flex; }
+    .det-meta {
+      display: flex; flex-direction: column; align-items: center; gap: .2rem;
+      min-width: 7rem;
+    }
+    #det-label { font-size: 1rem; font-weight: 600; letter-spacing: .26em; color: var(--ink); }
+    #det-kind {
+      font-size: .54rem; letter-spacing: .26em; text-transform: uppercase;
+      color: var(--teal-70);
+    }
+    #det-close {
+      font-size: .9rem; color: var(--ink-55);
+      border-color: var(--teal-22); background: transparent;
+    }
+    #det-close span {
+      font-size: .5rem; letter-spacing: .18em; text-transform: uppercase;
+    }
+
+    /* ── Legenda comandi ── */
+    #legend {
+      position: fixed; inset: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(6,20,27,.66); backdrop-filter: blur(3px);
+      opacity: 0; pointer-events: none; transition: opacity .25s ease;
+    }
+    #legend.on { opacity: 1; pointer-events: auto; }
+    .legend-card {
+      max-width: min(440px, 86vw);
+      background: rgba(8,22,30,.96); border: 1px solid var(--teal-40);
+      border-radius: 14px; padding: 1.6rem 1.8rem;
+      box-shadow: 0 24px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(37,150,190,.08);
+    }
+    .legend-card h2 {
+      font-size: .68rem; font-weight: 600; letter-spacing: .3em;
+      text-transform: uppercase; color: var(--lime); margin-bottom: 1.1rem;
+    }
+    .legend-card ul { list-style: none; display: grid; gap: .65rem; }
+    .legend-card li {
+      display: flex; align-items: center; gap: .8rem;
+      font-size: .74rem; color: var(--ink-55);
+    }
+    .legend-card li b {
+      flex: none; min-width: 3.4rem; text-align: center;
+      padding: .2rem .5rem; border-radius: 6px;
+      background: var(--teal-12); border: 1px solid var(--teal-22);
+      color: var(--teal); font-size: .66rem; font-weight: 600;
+    }
+
+    /* ─── Responsive ──────────────────────────────────── */
+    @media (max-width: 560px) {
+      .brand-sub { display: none; }
+      #topbar { height: 56px; }
+      #deck { height: 70px; }
+      .deck-browse { width: 88vw; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading">
+  <div class="ld-title">Atlante Fenotipico di Comunità</div>
+  <div class="ld-bar-wrap"><div class="ld-bar" id="ld-bar"></div></div>
+  <div class="ld-info"    id="ld-info">Inizializzazione…</div>
+</div>
+
+<!-- 3-D canvas -->
+<canvas id="c"></canvas>
+
+<!-- Vignette -->
+<div id="vignette"></div>
+
+<!-- Barra superiore -->
+<header id="topbar">
+  <div class="brand">
+    <span class="brand-mark">Atlante Fenotipico <em>di Comunità</em></span>
+    <span class="brand-sub">Comunità di Pollica</span>
+  </div>
+  <button id="help-btn" aria-label="Comandi" title="Comandi">?</button>
+</header>
+
+<!-- Deck inferiore -->
+<footer id="deck">
+  <!-- modalità normale: scrubber -->
+  <div class="deck-browse">
+    <button class="deck-step" id="step-prev" aria-label="Sposta a sinistra">&#8249;</button>
+    <div id="scrubber" role="slider" aria-label="Posizione nella collezione" tabindex="0">
+      <div id="scrub-fill"></div>
+      <div id="scrub-knob"></div>
+    </div>
+    <button class="deck-step" id="step-next" aria-label="Sposta a destra">&#8250;</button>
+  </div>
+  <!-- modalità dettaglio: zoom -->
+  <div class="deck-detail">
+    <button class="deck-nav" id="det-prev" aria-label="Soggetto precedente">&#8249;</button>
+    <button id="det-flip" aria-label="Gira la carta">&#8635;<span>Gira</span></button>
+    <div class="det-meta">
+      <span id="det-label"></span>
+      <span id="det-kind"></span>
+    </div>
+    <button class="deck-nav" id="det-next" aria-label="Soggetto successivo">&#8250;</button>
+    <button id="det-close" aria-label="Chiudi">&#10005;<span>Esc</span></button>
+  </div>
+</footer>
+
+<!-- Legenda comandi -->
+<div id="legend">
+  <div class="legend-card">
+    <h2>Come navigare</h2>
+    <ul>
+      <li><b>Trascina</b> Esplora la griglia</li>
+      <li><b>Rotella</b> Avvicina / allontana</li>
+      <li><b>Click</b> Apri una carta · cliccala per girarla</li>
+      <li><b>Spazio</b> Gira la carta (fronte &harr; retro)</li>
+      <li><b>&#8592; &#8594;</b> Soggetto precedente / successivo</li>
+      <li><b>Esc</b> Chiudi</li>
+    </ul>
+  </div>
+</div>
+
+<!-- Three.js r134 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+
+<script>
+'use strict';
+
+/* ══════════════════════════════════════════════════════════════
+   CONFIG
+   ══════════════════════════════════════════════════════════════ */
+const CFG = {
+  // Una CELLA = un SOGGETTO = una carta fronte-retro.
+  // 113 soggetti (226 immagini / 2) su griglia 15×8 = 120 celle, 7 vuote in fondo.
+  COLS : 15,
+  ROWS : 8,
+
+  // Immagini totali in images/ e soggetti (coppie fronte+retro).
+  TOTAL_IMGS  : 226,
+  NUM_SUBJECTS: 113,   // = TOTAL_IMGS / 2
+
+  // Adatta IMG_W / IMG_H al rapporto esatto delle tue immagini
+  // Esempi:  4:3 → 1.6 / 1.2   |  1:1 → 1.2 / 1.2   |  3:4 → 1.2 / 1.6
+  IMG_W : 2,
+  IMG_H : 1,
+
+  // ZERO spaziatura
+  GAP_X : 0,
+  GAP_Y : 0,
+
+  // Percorso immagini
+  PATH : 'images/',
+  EXT  : '.webp',
+  // Miniature (griglia): caricate all'avvio al posto del full-res.
+  // Il full-res 1920×960 si carica solo quando un'immagine viene ingrandita.
+  THUMB_PATH : 'thumbs/',
+  THUMB_EXT  : '.jpg',
+  // Nomi file: 001.webp … 226.webp (3 cifre, zero-pad).
+  // Mappatura cella → soggetto (riga-major): subjectAt = row*COLS + col.
+  // Per ogni soggetto s: fronte = 2s+1 (dispari), retro = 2s+2 (pari).
+  //   Cella (0,0) → soggetto 0 → fronte 001 / retro 002
+  //   Cella (0,1) → soggetto 1 → fronte 003 / retro 004 …
+
+  // Camera
+  CAM_Z    :  7,    // distanza iniziale
+  CAM_FOV  : 55,    // FOV verticale (°)
+  CAM_Z_MIN: 0.4,   // limite zoom in
+  CAM_Z_MAX: 16,    // limite zoom out
+
+  // Navigazione
+  NAV_STEP  : 0.25, // passo pulsanti freccia
+  INERTIA   : 0.87, // inerzia drag
+  LERP_NAV  : 0.10, // smoothing navigazione normale
+  LERP_ZOOM : 0.055,// smoothing animazione zoom (più cinematico)
+
+  // Caricamento
+  BATCH_SIZE: 16,
+  BATCH_MS  : 40,
+
+  // Effetti
+  FLOAT_AMP : 0.035,// ampiezza fluttuazione verticale
+  FLOAT_SPD : 0.38, // Hz
+  HOVER_SCL : 1.05, // scala hover
+};
+
+const TOTAL = CFG.TOTAL_IMGS;  // immagini reali (celle oltre questo valore non vengono create)
+const TEST  = new URLSearchParams(location.search).has('test');
+
+/* ══════════════════════════════════════════════════════════════
+   Utility
+   ══════════════════════════════════════════════════════════════ */
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// Lerp frame-rate independent: t è la fraction nominale a 60 fps,
+// dt è il delta reale in secondi. Evita che la camera sia troppo
+// reattiva a 144 Hz e troppo lenta a 30 Hz.
+function lerpDt(a, b, t60, dt) {
+  const alpha = 1 - Math.pow(1 - t60, dt * 60);
+  return lerp(a, b, alpha);
+}
+
+// Flag per il dimming: true mentre c'è uno zoom attivo o la transizione
+// verso COLOR_FULL non è ancora completata. Evita 226 lerp inutili a frame.
+let dimmingActive = false;
+
+// Cella (row,col) → indice soggetto (riga-major).
+function subjectAt(row, col) { return row * CFG.COLS + col; }
+// Numeri file della carta: fronte = 2s+1 (presentazione), retro = 2s+2 (identikit).
+function frontNum(row, col) { return subjectAt(row, col) * 2 + 1; }
+function backNum (row, col) { return subjectAt(row, col) * 2 + 2; }
+
+// Percorsi/label a partire da un numero file.
+function pad3(n)      { return String(n).padStart(3, '0'); }
+function imgSrcN(n)   { return CFG.PATH       + pad3(n) + CFG.EXT; }
+function thumbSrcN(n) { return CFG.THUMB_PATH + pad3(n) + CFG.THUMB_EXT; }
+function imgLabelN(n) { return pad3(n); }
+
+/* ══════════════════════════════════════════════════════════════
+   Three.js — Renderer, Scene, Camera
+   ══════════════════════════════════════════════════════════════ */
+const canvas   = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x06141b, 1);
+
+const scene = new THREE.Scene();
+scene.fog   = new THREE.Fog(0x06141b, 45, 110);
+
+const camera = new THREE.PerspectiveCamera(
+  CFG.CAM_FOV, window.innerWidth / window.innerHeight, 0.1, 200
+);
+camera.position.set(0, 0, CFG.CAM_Z);
+
+/* ══════════════════════════════════════════════════════════════
+   Particelle di sfondo
+   ══════════════════════════════════════════════════════════════ */
+(function buildParticles() {
+  const N = 2000, pos = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    pos[i*3]   = (Math.random()-.5)*260;
+    pos[i*3+1] = (Math.random()-.5)* 60;
+    pos[i*3+2] = -(Math.random()*70 + 8);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({
+    color:0x2596be, size:0.04, transparent:true, opacity:0.38, sizeAttenuation:true
+  })));
+})();
+
+/* ══════════════════════════════════════════════════════════════
+   Griglia — ZERO gap, tutte le immagini allo stesso z
+   ══════════════════════════════════════════════════════════════ */
+// Con GAP = 0: CELL = IMG, griglia perfettamente contigua
+const CELL_W = CFG.IMG_W;   // = IMG_W + 0
+const CELL_H = CFG.IMG_H;   // = IMG_H + 0
+const GRID_W = CFG.COLS * CELL_W;
+const GRID_H = CFG.ROWS * CELL_H;
+const OX     = -GRID_W / 2;   // bordo sinistro della griglia
+const OY     =  GRID_H / 2;   // bordo superiore della griglia
+
+// Placeholder: rettangolo scuro con bordo sottile
+function makePlaceholder() {
+  const w = 32, h = Math.round(32 * CFG.IMG_H / CFG.IMG_W);
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#08161d';
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = 'rgba(37,150,190,.25)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(.5, .5, w-1, h-1);
+  return new THREE.CanvasTexture(c);
+}
+const phTex = makePlaceholder();
+
+// Texture test (modalità ?test) — mostra il numero file
+function makeTestTex(n) {
+  const w   = 160, h = Math.round(160 * CFG.IMG_H / CFG.IMG_W);
+  const cvs = document.createElement('canvas');
+  cvs.width = w; cvs.height = h;
+  const ctx = cvs.getContext('2d');
+  // Colore diverso per ogni soggetto; il retro (pari) leggermente più chiaro
+  const hue = ((n - 1) >> 1) / CFG.NUM_SUBJECTS * 320;
+  const lit = 11 + ((n % 2 === 0) ? 5 : 0);
+  ctx.fillStyle = `hsl(${hue},48%,${lit}%)`;
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = `hsla(${hue},70%,55%,.35)`;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, w-2, h-2);
+  // Numero file grande al centro
+  ctx.fillStyle = `hsla(${hue},85%,72%,.8)`;
+  ctx.font = `bold ${Math.round(h * .3)}px monospace`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(String(n).padStart(3, '0'), w/2, h/2);
+  return new THREE.CanvasTexture(cvs);
+}
+
+const geo    = new THREE.PlaneGeometry(CFG.IMG_W, CFG.IMG_H);
+const grp    = new THREE.Group();
+scene.add(grp);
+
+// Una CARTA = THREE.Group con due piani: fronte (rot.y 0) e retro (rot.y π).
+// Con backface culling (side: FrontSide) a rotazione 0 si vede solo il fronte,
+// a rotazione π solo il retro (orientato correttamente, non specchiato).
+const cards     = [];   // 113 gruppi (hover/zoom/navigazione)
+const planes    = [];   // 226 piani  (caricamento texture)
+// Lookup O(1): meshGrid[row * CFG.COLS + col] → carta (null se la cella è vuota)
+const meshGrid  = new Array(CFG.ROWS * CFG.COLS).fill(null);
+
+for (let row = 0; row < CFG.ROWS; row++) {
+  for (let col = 0; col < CFG.COLS; col++) {
+    if (subjectAt(row, col) >= CFG.NUM_SUBJECTS) continue;   // cella vuota
+    const x = OX + col * CELL_W + CFG.IMG_W / 2;
+    const y = OY - row * CELL_H - CFG.IMG_H / 2;
+
+    const card  = new THREE.Group();
+    card.position.set(x, y, 0);
+
+    const front = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: phTex }));
+    const back  = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: phTex }));
+    back.rotation.y = Math.PI;   // guarda dal lato opposto
+
+    front.userData = { card, file: frontNum(row, col), side: 'front' };
+    back.userData  = { card, file: backNum(row, col),  side: 'back'  };
+
+    card.add(front); card.add(back);
+    card.userData = { row, col, flip: 0, planes: [front, back] };
+
+    grp.add(card);
+    cards.push(card);
+    planes.push(front, back);
+    meshGrid[row * CFG.COLS + col] = card;
+  }
+}
+
+// Helper: applica un'azione a entrambi i piani di una carta.
+function cardRenderOrder(card, n) { for (const p of card.userData.planes) p.renderOrder = n; }
+
+/* ── Colori per il dimming dei mesh non attivi ── */
+// MeshBasicMaterial moltiplica texture × color, quindi:
+//   color (1,1,1) = piena luminosità   |   color (0.3,0.3,0.3) = scurito al 30%
+const COLOR_FULL = new THREE.Color(1.0, 1.0, 1.0);
+const COLOR_DIM  = new THREE.Color(0.28, 0.28, 0.28);
+
+/* ══════════════════════════════════════════════════════════════
+   Caricamento texture
+   ══════════════════════════════════════════════════════════════ */
+const texLoader  = new THREE.TextureLoader();
+const ldBar      = document.getElementById('ld-bar');
+const ldInfo     = document.getElementById('ld-info');
+let   loadedN    = 0;
+let   failedURLs = [];   // raccoglie i percorsi che non caricano
+
+// ── Texture placeholder per errore (tinta arancione, percorso visibile) ──
+function makeErrTex(url) {
+  const w = 160, h = Math.round(160 * CFG.IMG_H / CFG.IMG_W);
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#1a0203';
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = 'rgba(245,5,8,.5)';
+  ctx.lineWidth = 2; ctx.strokeRect(1, 1, w-2, h-2);
+  ctx.fillStyle = 'rgba(245,5,8,.85)';
+  ctx.font = `bold ${Math.round(h*.18)}px monospace`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('404', w/2, h/2 - h*.12);
+  ctx.font = `${Math.round(h*.09)}px monospace`;
+  ctx.fillStyle = 'rgba(245,5,8,.55)';
+  // mostra solo il nome file, non tutto il path
+  ctx.fillText(url.split('/').pop(), w/2, h/2 + h*.14);
+  return new THREE.CanvasTexture(c);
+}
+
+function onTexDone(plane, tex, url) {
+  if (tex) {
+    plane.material.map = tex;
+    plane.material.needsUpdate = true;
+    renderer.initTexture(tex);
+    plane.userData.thumbTex = tex;   // miniatura: resta in memoria, riusata al de-zoom
+  } else {
+    failedURLs.push(url);
+    const errTex = makeErrTex(url);
+    plane.material.map = errTex;
+    plane.material.needsUpdate = true;
+    plane.userData.thumbTex = errTex;
+  }
+  loadedN++;
+  ldBar.style.width = (loadedN / TOTAL * 100).toFixed(1) + '%';
+  ldInfo.textContent = loadedN + ' / ' + TOTAL;
+  if (loadedN >= TOTAL) setTimeout(onAllLoaded, 300);
+}
+
+function onAllLoaded() {
+  if (failedURLs.length === 0) {
+    hideLoading();
+    return;
+  }
+  // ── Mostra diagnostica ──────────────────────────────────────────
+  const pct  = Math.round(failedURLs.length / TOTAL * 100);
+  const ldEl = document.getElementById('loading');
+
+  // Barra diventa rossa se tutto fallisce, arancione se parziale
+  ldBar.style.background = failedURLs.length === TOTAL ? '#f50508' : '#ee15ef';
+
+  if (location.protocol === 'file:') {
+    ldInfo.innerHTML =
+      '<span style="color:#ee15ef">⚠ Aperto come file locale (file://)</span><br>' +
+      '<span style="color:rgba(234,251,255,.45);font-size:.55rem">' +
+      'Usa un server web locale: <strong style="color:rgba(234,251,255,.7)">npx http-server .</strong> oppure ' +
+      'VS Code → Live Server</span>';
+  } else {
+    ldInfo.innerHTML =
+      `<span style="color:#ee15ef">⚠ ${failedURLs.length} / ${TOTAL} immagini non trovate (${pct}%)</span>`;
+
+    // Mostra il percorso del primo file fallito
+    const hint = document.createElement('div');
+    hint.style.cssText =
+      'margin-top:.6rem;font-size:.52rem;color:rgba(245,5,8,.6);' +
+      'max-width:80vw;word-break:break-all;text-align:center;line-height:1.5';
+    hint.innerHTML =
+      `Percorso tentato:<br>` +
+      `<strong style="color:rgba(245,90,92,.85)">${failedURLs[0]}</strong><br>` +
+      `<span style="color:rgba(234,251,255,.3)">Verifica che la cartella <em>images/</em> ` +
+      `sia nella stessa directory di <em>index.html</em></span>`;
+    ldEl.appendChild(hint);
+  }
+
+  // Pulsante "continua comunque" (mostra i placeholder rossi)
+  const btn = document.createElement('button');
+  btn.textContent = 'Continua comunque →';
+  btn.style.cssText =
+    'margin-top:1.4rem;padding:.45rem 1.1rem;background:rgba(37,150,190,.1);' +
+    'border:1px solid rgba(37,150,190,.35);border-radius:2px;color:#2596be;' +
+    'font-size:.62rem;letter-spacing:.15em;text-transform:uppercase;cursor:pointer;';
+  btn.addEventListener('click', hideLoading);
+  ldEl.appendChild(btn);
+
+  console.warn('[AtlanteFen] Immagini non caricate:', failedURLs);
+}
+
+function hideLoading() {
+  const el = document.getElementById('loading');
+  el.classList.add('fade-out');
+  document.body.classList.add('ready');           // fa entrare topbar + deck
+  setTimeout(() => { el.style.display = 'none'; }, 950);
+  // Intro pull-back
+  camera.position.z = CFG.CAM_Z + 3;
+  camTargetZ = CFG.CAM_Z;
+}
+
+function loadBatch(start) {
+  const end = Math.min(start + CFG.BATCH_SIZE, TOTAL);
+  for (let i = start; i < end; i++) {
+    const p   = planes[i];
+    const url = thumbSrcN(p.userData.file);
+    if (TEST) {
+      onTexDone(p, makeTestTex(p.userData.file), url);
+    } else {
+      texLoader.load(
+        url,
+        (tex) => onTexDone(p, tex, url),
+        undefined,
+        ()    => onTexDone(p, null, url)
+      );
+    }
+  }
+  if (end < TOTAL) setTimeout(() => loadBatch(end), TEST ? 2 : CFG.BATCH_MS);
+}
+
+// ── Rilevamento file:// prima ancora di iniziare ──────────────────────────
+if (location.protocol === 'file:') {
+  ldInfo.innerHTML =
+    '<span style="color:#ee15ef">⚠ Protocollo file:// — le immagini non caricheranno</span>';
+}
+
+loadBatch(0);
+
+/* ══════════════════════════════════════════════════════════════
+   Stato camera
+   ══════════════════════════════════════════════════════════════ */
+let camTargetX = 0;
+let camTargetY = 0;
+let camTargetZ = CFG.CAM_Z;
+let velX = 0;   // inerzia orizzontale
+let velY = 0;   // inerzia verticale
+
+/* ──────────────────────────────────────────────────────────────
+   Limiti orizzontali (X).
+   Il clamp usa il z TARGET per avere limiti corretti anche
+   durante l'animazione di zoom.
+   ────────────────────────────────────────────────────────────── */
+function halfViewX(z) {
+  z = (z !== undefined) ? z : camTargetZ;
+  return Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.abs(z) * camera.aspect;
+}
+function halfViewY(z) {
+  z = (z !== undefined) ? z : camTargetZ;
+  return Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.abs(z);
+}
+function clampX(x, z) {
+  const hv = halfViewX(z);
+  // bordo sinistro → bordo destro della griglia
+  const mn = OX       + hv;     // col 0 allineata al bordo sinistro della vista
+  const mx = OX + GRID_W - hv;  // col 49 allineata al bordo destro della vista
+  if (mn > mx) return 0;        // griglia più stretta del viewport
+  return Math.max(mn, Math.min(mx, x));
+}
+function clampY(y, z) {
+  const halfH = halfViewY(z);   // halfViewY usa camTargetZ se z è undefined → niente NaN
+  const mn = -GRID_H/2 + halfH;
+  const mx =  GRID_H/2 - halfH;
+  if (mn > mx) return 0;
+  return Math.max(mn, Math.min(mx, y));
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Zoom su immagine (3D — nessun lightbox)
+   ══════════════════════════════════════════════════════════════ */
+let zoomedMesh    = null;   // mesh attualmente ingrandita
+let returningMesh = null;   // mesh che sta tornando a z=0 dopo un de-zoom
+let savedCam      = null;   // stato camera prima dello zoom
+
+function fitZForMesh() {
+  // z a cui l'immagine riempie lo schermo (contain)
+  const halfV  = THREE.MathUtils.degToRad(camera.fov / 2);
+  const halfH  = Math.atan(Math.tan(halfV) * camera.aspect);
+  const zForH  = (CFG.IMG_H / 2) / Math.tan(halfV);
+  const zForW  = (CFG.IMG_W / 2) / Math.tan(halfH);
+  return Math.max(zForH, zForW) + 0.08;  // piccolo offset anti z-fight
+}
+
+// ── Full-res on demand ─────────────────────────────────────────
+// La griglia mostra le miniature; il full-res 1920×960 (~7 MB) si carica solo
+// per la carta aperta (fronte + retro) e si libera quando torna in griglia.
+function loadPlaneFull(plane) {
+  if (TEST || plane.userData.fullTex || plane.userData.fullLoading) return;
+  plane.userData.fullLoading = true;
+  texLoader.load(
+    imgSrcN(plane.userData.file),
+    (tex) => {
+      plane.userData.fullLoading = false;
+      // Se la carta non è più quella aperta, scarta subito.
+      if (plane.userData.card !== zoomedMesh) { tex.dispose(); return; }
+      plane.userData.fullTex = tex;
+      plane.material.map = tex;
+      plane.material.needsUpdate = true;
+      renderer.initTexture(tex);
+    },
+    undefined,
+    () => { plane.userData.fullLoading = false; }  // resta la miniatura
+  );
+}
+function loadFullRes(card) {
+  if (!card || !card.userData.planes) return;
+  for (const plane of card.userData.planes) loadPlaneFull(plane);  // fronte + retro
+}
+
+function releaseFullRes(card) {
+  if (!card || !card.userData.planes) return;
+  for (const plane of card.userData.planes) {
+    if (!plane.userData.fullTex) continue;
+    plane.material.map = plane.userData.thumbTex;
+    plane.material.needsUpdate = true;
+    plane.userData.fullTex.dispose();
+    plane.userData.fullTex = null;
+  }
+}
+
+function zoomTo(mesh) {
+  if (!savedCam) {
+    savedCam = { x: camTargetX, y: camTargetY, z: camTargetZ };
+  }
+  // Riporta indietro l'eventuale mesh in hover (lo zoom gestirà il suo z)
+  if (hoveredMesh && hoveredMesh !== mesh) clearHoverMesh(hoveredMesh);
+  else if (hoveredMesh === mesh) {
+    // Il mesh cliccato era in hover: pulisci solo le map, lo z lo gestisce zoomTo
+    hoverTargets.delete(mesh);
+    hoverZTargets.delete(mesh);
+  }
+  hoveredMesh = null;
+
+  // La vecchia carta attiva torna a z=0 (e si rigira sul fronte)
+  if (zoomedMesh && zoomedMesh !== mesh) { zoomedMesh.userData.flip = 0; returningMesh = zoomedMesh; }
+
+  zoomedMesh = mesh;
+  mesh.userData.flip = 0;          // si apre sempre sul fronte (presentazione)
+  loadFullRes(mesh);               // precarica fronte + retro
+  camTargetX = mesh.position.x;
+  camTargetY = mesh.position.y;
+  camTargetZ = fitZForMesh();
+  velX = 0;
+  dimmingActive = true;
+  document.body.classList.add('zoomed');
+  updateZoomHUD();
+  setCanvasCursor('zoomout');
+  document.getElementById('vignette').classList.add('dimmed');
+}
+
+function unzoom() {
+  if (!savedCam) return;
+  camTargetX = savedCam.x;
+  camTargetY = savedCam.y;
+  camTargetZ = savedCam.z;
+  savedCam   = null;
+  // Pulisci anche l'hover residuo
+  clearHoverMesh(hoveredMesh);
+  hoveredMesh = null;
+  if (zoomedMesh) { zoomedMesh.userData.flip = 0; returningMesh = zoomedMesh; }
+  zoomedMesh = null;
+  dimmingActive = true;
+  setCanvasCursor('grab');
+  document.getElementById('vignette').classList.remove('dimmed');
+  document.body.classList.remove('zoomed');
+}
+
+// Passa alla carta adiacente (soggetto prec/succ), saltando le celle vuote.
+function navigateCard(dRow, dCol) {
+  if (!zoomedMesh) return;
+  let { row, col } = zoomedMesh.userData;
+  for (let i = 0; i < CFG.ROWS * CFG.COLS; i++) {
+    row = (row + dRow + CFG.ROWS) % CFG.ROWS;
+    col = (col + dCol + CFG.COLS) % CFG.COLS;
+    const c = meshGrid[row * CFG.COLS + col];
+    if (c && c !== zoomedMesh) { zoomTo(c); return; }
+  }
+}
+
+// Gira la carta (fronte ↔ retro). side opzionale: 0=fronte, 1=retro; altrimenti alterna.
+function flipCard(side) {
+  if (!zoomedMesh) return;
+  const next = (side !== undefined) ? side : (zoomedMesh.userData.flip ? 0 : 1);
+  zoomedMesh.userData.flip = next;
+  loadFullRes(zoomedMesh);   // assicura il full-res del lato che comparirà
+  updateZoomHUD();
+}
+
+const detLabel = document.getElementById('det-label');
+const detKind  = document.getElementById('det-kind');
+function updateZoomHUD() {
+  if (!zoomedMesh) return;
+  const { row, col, flip } = zoomedMesh.userData;
+  detLabel.textContent = imgLabelN(flip ? backNum(row, col) : frontNum(row, col));
+  detKind.textContent  = flip ? 'Identikit' : 'Presentazione';
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Cursore canvas
+   ══════════════════════════════════════════════════════════════ */
+function setCanvasCursor(c) {
+  canvas.classList.remove('grabbing','zoomin','zoomout');
+  canvas.style.cursor = '';
+  if (c !== 'grab') canvas.classList.add(c);
+  else canvas.style.cursor = 'grab';
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Mouse drag
+   ══════════════════════════════════════════════════════════════ */
+let dragging     = false;
+let dragStartPx  = 0;
+let dragStartPxY = 0;
+let dragStartCamX = 0;
+let dragStartCamY = 0;
+let frameVelX    = 0;
+let frameVelY    = 0;
+
+canvas.addEventListener('mousedown', (e) => {
+  dragStartPx  = e.clientX;  // aggiorna sempre: serve al click handler per distinguere click da drag
+  dragStartPxY = e.clientY;
+  if (zoomedMesh) return;   // drag disabilitato quando zoommati
+  dragging = true;
+  dragStartCamX = camTargetX;
+  dragStartCamY = camTargetY;
+  frameVelX     = 0;
+  frameVelY     = 0;
+  setCanvasCursor('grabbing');
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) {
+    updateHover(e.clientX, e.clientY);
+    return;
+  }
+  const dPx    = e.clientX - dragStartPx;
+  const dWorld = (dPx / window.innerWidth) * halfViewX() * 2;
+  const nx     = clampX(dragStartCamX - dWorld);
+  frameVelX    = nx - camTargetX;
+  camTargetX   = nx;
+
+  const dPxY    = e.clientY - dragStartPxY;
+  const dWorldY = (dPxY / window.innerHeight) * halfViewY() * 2;
+  const ny      = clampY(dragStartCamY + dWorldY);  // trascini giù → la griglia scende
+  frameVelY     = ny - camTargetY;
+  camTargetY    = ny;
+});
+
+window.addEventListener('mouseup', () => {
+  if (!dragging) return;
+  dragging = false;
+  setCanvasCursor(zoomedMesh ? 'zoomout' : 'grab');
+  velX = frameVelX;
+  velY = frameVelY;
+});
+
+/* ── Click ────────────────────────────────────────────────── */
+canvas.addEventListener('click', (e) => {
+  // ignora se era un vero drag (su uno qualsiasi dei due assi)
+  if (Math.abs(e.clientX - dragStartPx) > 5 || Math.abs(e.clientY - dragStartPxY) > 5) return;
+
+  if (zoomedMesh) {
+    const card = cardAtRay(e.clientX, e.clientY);
+    if (card === zoomedMesh) flipCard();      // click sulla carta aperta → gira
+    else if (card)           zoomTo(card);    // click su un'altra carta → aprila
+    else                     unzoom();        // click fuori → chiudi
+    return;
+  }
+  const card = cardAtRay(e.clientX, e.clientY);
+  if (card) zoomTo(card);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   Touch — pan (normale) + tap (zoom)
+   ══════════════════════════════════════════════════════════════ */
+let touchStartX    = 0;
+let touchStartY    = 0;
+let touchStartCamX = 0;
+let touchStartCamY = 0;
+let touchVel       = 0;
+let touchVelY      = 0;
+let touchIsClick   = false;
+let touchT0        = 0;
+// pinch
+let pinchDist0     = 0;
+let pinchZ0        = 0;
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (e.touches.length === 1) {
+    const t = e.touches[0];
+    touchStartX    = t.clientX;
+    touchStartY    = t.clientY;
+    touchStartCamX = camTargetX;
+    touchStartCamY = camTargetY;
+    touchVel       = 0;
+    touchVelY      = 0;
+    touchIsClick   = true;
+    touchT0        = Date.now();
+  } else if (e.touches.length === 2) {
+    touchIsClick = false;
+    pinchDist0 = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    pinchZ0 = camTargetZ;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (e.touches.length === 1 && !zoomedMesh) {
+    const t      = e.touches[0];
+    const dPx    = t.clientX - touchStartX;
+    const dWorld = (dPx / window.innerWidth) * halfViewX() * 2;
+    const nx     = clampX(touchStartCamX - dWorld);
+    touchVel     = nx - camTargetX;
+    camTargetX   = nx;
+
+    const dPxY    = t.clientY - touchStartY;
+    const dWorldY = (dPxY / window.innerHeight) * halfViewY() * 2;
+    const ny      = clampY(touchStartCamY + dWorldY);
+    touchVelY     = ny - camTargetY;
+    camTargetY    = ny;
+
+    if (Math.abs(dPx) > 9 || Math.abs(dPxY) > 9) touchIsClick = false;
+  } else if (e.touches.length === 2) {
+    const d = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    camTargetZ = Math.max(CFG.CAM_Z_MIN, Math.min(CFG.CAM_Z_MAX, pinchZ0 * (pinchDist0 / d)));
+    if (!zoomedMesh) { camTargetX = clampX(camTargetX); camTargetY = clampY(camTargetY); }
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (touchIsClick && Date.now() - touchT0 < 320) {
+    const t = e.changedTouches[0];
+    if (zoomedMesh) {
+      const card = cardAtRay(t.clientX, t.clientY);
+      if (card === zoomedMesh) flipCard();
+      else if (card)           zoomTo(card);
+      else                     unzoom();
+    } else {
+      const card = cardAtRay(t.clientX, t.clientY);
+      if (card) zoomTo(card);
+    }
+  } else if (!zoomedMesh) {
+    velX = touchVel;
+    velY = touchVelY;
+  }
+}, { passive: false });
+
+/* ══════════════════════════════════════════════════════════════
+   Scroll wheel → ZOOM verso il cursore
+   ══════════════════════════════════════════════════════════════ */
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const oldZ = camTargetZ;
+  const newZ = Math.max(CFG.CAM_Z_MIN, Math.min(CFG.CAM_Z_MAX, oldZ + e.deltaY * 0.009));
+  if (newZ === oldZ) return;
+
+  // In entrambe le modalità (normale e immagine attiva): zoom verso il cursore.
+  // Il punto mondo sotto il cursore rimane fisso dopo il cambio di Z.
+  //   dx = ndcX × (halfView(oldZ) − halfView(newZ))
+  const ndcX  = (2 * e.clientX / window.innerWidth)  - 1;
+  const ndcY  = 1 - (2 * e.clientY / window.innerHeight);
+  const tanHV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const dHVX  = tanHV * (oldZ - newZ) * camera.aspect;
+  const dHVY  = tanHV * (oldZ - newZ);
+
+  if (zoomedMesh) {
+    camTargetY = clampY(camTargetY + ndcY * dHVY, newZ);
+
+    // Dezoom automatico: se ci si allontana oltre 2.5× la distanza di fit,
+    // l'immagine non è più attiva ma la camera rimane dov'è (non torna a savedCam).
+    if (newZ > fitZForMesh() * 2.5) {
+      savedCam = null;                    // scarta il punto di ritorno salvato
+      clearHoverMesh(hoveredMesh);
+      hoveredMesh = null;
+      zoomedMesh.userData.flip = 0;       // rientra sul fronte
+      returningMesh = zoomedMesh;
+      zoomedMesh = null;
+      dimmingActive = true;
+      setCanvasCursor('grab');
+      document.getElementById('vignette').classList.remove('dimmed');
+      document.body.classList.remove('zoomed');
+      // sblocca anche X per questo stesso scroll
+      camTargetX = clampX(camTargetX + ndcX * dHVX, newZ);
+    }
+  } else {
+    camTargetX = clampX(camTargetX + ndcX * dHVX, newZ);
+    camTargetY = clampY(camTargetY + ndcY * dHVY, newZ);
+  }
+  camTargetZ = newZ;
+}, { passive: false });
+
+/* ══════════════════════════════════════════════════════════════
+   Pulsanti freccia sinistra/destra (navigazione griglia)
+   ══════════════════════════════════════════════════════════════ */
+let navTimer = null;
+function startNav(dir) {
+  stopNav();
+  navTimer = setInterval(() => {
+    if (zoomedMesh) return;
+    camTargetX = clampX(camTargetX + dir * CFG.NAV_STEP); velX = 0;
+  }, 16);
+}
+function stopNav() { clearInterval(navTimer); navTimer = null; }
+
+// Stepper del deck (modalità normale): pan continuo finché premuti.
+document.getElementById('step-prev').addEventListener('mousedown', () => startNav(-1));
+document.getElementById('step-next').addEventListener('mousedown', () => startNav(+1));
+document.getElementById('step-prev').addEventListener('touchstart', (e) => { e.preventDefault(); startNav(-1); }, {passive:false});
+document.getElementById('step-next').addEventListener('touchstart', (e) => { e.preventDefault(); startNav(+1); }, {passive:false});
+['mouseup','touchend'].forEach(ev => window.addEventListener(ev, stopNav));
+
+/* ── Deck dettaglio: soggetto prec/succ · gira (fronte↔retro) · chiudi ── */
+document.getElementById('det-prev').addEventListener('click', () => navigateCard(0, -1));
+document.getElementById('det-next').addEventListener('click', () => navigateCard(0, +1));
+document.getElementById('det-flip').addEventListener('click', () => flipCard());
+document.getElementById('det-close').addEventListener('click', unzoom);
+
+/* ── Legenda comandi (?) ── */
+const legendEl = document.getElementById('legend');
+function toggleLegend(force) {
+  const on = (force !== undefined) ? force : !legendEl.classList.contains('on');
+  legendEl.classList.toggle('on', on);
+}
+document.getElementById('help-btn').addEventListener('click', () => toggleLegend());
+legendEl.addEventListener('click', () => toggleLegend(false));   // click fuori dalla card chiude
+legendEl.querySelector('.legend-card').addEventListener('click', (e) => e.stopPropagation());
+
+/* ══════════════════════════════════════════════════════════════
+   Scrubber — posizione orizzontale nella collezione (no contatore)
+   ══════════════════════════════════════════════════════════════ */
+const scrubEl  = document.getElementById('scrubber');
+const scrubFill = document.getElementById('scrub-fill');
+const scrubKnob = document.getElementById('scrub-knob');
+let scrubbing = false;
+
+// Limiti orizzontali pannabili al z corrente (stessa logica di clampX).
+function scrubBounds() {
+  const hv = halfViewX();
+  return { mn: OX + hv, mx: OX + GRID_W - hv };
+}
+// Aggiorna manopola/riempimento dalla posizione camera (chiamato nel loop).
+let lastScrubF = -1;
+function updateScrubber() {
+  if (scrubbing || zoomedMesh) return;
+  const { mn, mx } = scrubBounds();
+  if (mx <= mn) {                       // griglia più stretta della vista → disabilita
+    if (!scrubEl.classList.contains('disabled')) scrubEl.classList.add('disabled');
+    return;
+  }
+  scrubEl.classList.remove('disabled');
+  const f = Math.max(0, Math.min(1, (camTargetX - mn) / (mx - mn)));
+  if (Math.abs(f - lastScrubF) < 0.0015) return;   // evita scritture DOM inutili
+  lastScrubF = f;
+  scrubFill.style.width = (f * 100) + '%';
+  scrubKnob.style.left  = (f * 100) + '%';
+}
+// Da posizione cursore sul binario → camTargetX.
+function scrubToClientX(clientX) {
+  const r = scrubEl.getBoundingClientRect();
+  const f = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+  const { mn, mx } = scrubBounds();
+  if (mx <= mn) return;
+  camTargetX = clampX(mn + f * (mx - mn));
+  velX = 0;
+  lastScrubF = -1; updateScrubberForce(f);
+}
+function updateScrubberForce(f) {
+  scrubFill.style.width = (f * 100) + '%';
+  scrubKnob.style.left  = (f * 100) + '%';
+}
+scrubEl.addEventListener('pointerdown', (e) => {
+  if (zoomedMesh) return;
+  scrubbing = true; scrubEl.classList.add('dragging');
+  scrubEl.setPointerCapture(e.pointerId);
+  scrubToClientX(e.clientX);
+});
+scrubEl.addEventListener('pointermove', (e) => { if (scrubbing) scrubToClientX(e.clientX); });
+function endScrub(e) {
+  if (!scrubbing) return;
+  scrubbing = false; scrubEl.classList.remove('dragging');
+  if (e && e.pointerId !== undefined && scrubEl.hasPointerCapture(e.pointerId))
+    scrubEl.releasePointerCapture(e.pointerId);
+}
+scrubEl.addEventListener('pointerup', endScrub);
+scrubEl.addEventListener('pointercancel', endScrub);
+// Tastiera sullo scrubber: ← → spostano la vista.
+scrubEl.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft')  { camTargetX = clampX(camTargetX - CFG.NAV_STEP * 3); velX = 0; }
+  if (e.key === 'ArrowRight') { camTargetX = clampX(camTargetX + CFG.NAV_STEP * 3); velX = 0; }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   Tastiera
+   ══════════════════════════════════════════════════════════════ */
+const KEYS = {};
+window.addEventListener('keydown', (e) => {
+  KEYS[e.key] = true;
+  if (e.key === '?') { toggleLegend(); return; }
+  if (e.key === 'Escape') {
+    if (legendEl.classList.contains('on')) { toggleLegend(false); return; }
+    unzoom(); return;
+  }
+  if (zoomedMesh) {
+    if (e.key === 'ArrowRight')      navigateCard(0, +1);   // soggetto successivo
+    else if (e.key === 'ArrowLeft')  navigateCard(0, -1);   // soggetto precedente
+    else if (e.key === 'ArrowDown')  flipCard(1);           // mostra retro (identikit)
+    else if (e.key === 'ArrowUp')    flipCard(0);           // mostra fronte (presentazione)
+    else if (e.key === ' ' || e.key === 'f' || e.key === 'F') flipCard();  // alterna
+    e.preventDefault();
+  }
+});
+window.addEventListener('keyup', (e) => delete KEYS[e.key]);
+
+/* ══════════════════════════════════════════════════════════════
+   Raycasting
+   ══════════════════════════════════════════════════════════════ */
+const raycaster = new THREE.Raycaster();
+const nd        = new THREE.Vector2();
+
+// Restituisce la CARTA sotto il punto schermo (o null). In griglia il backface
+// culling fa colpire solo i fronti; da zoom anche il retro (face verso la camera).
+function cardAtRay(cx, cy) {
+  nd.x =  (cx / window.innerWidth)  * 2 - 1;
+  nd.y = -(cy / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(nd, camera);
+  const hits = raycaster.intersectObjects(planes);
+  return hits.length ? hits[0].object.userData.card : null;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Hover (solo desktop, solo fuori dallo zoom)
+   ══════════════════════════════════════════════════════════════ */
+let hoveredMesh     = null;
+const hoverTargets  = new Map();   // mesh → target scale
+const hoverZTargets = new Map();   // mesh → target z position
+let   hoverThrottle = 0;
+
+const HOVER_Z = 0.03;   // elevazione Z sull'hover (metà di ACTIVE_Z)
+
+function clearHoverMesh(m) {
+  // Riporta una carta allo stato pre-hover (usato anche da zoomTo)
+  if (!m) return;
+  hoverTargets.set(m, 1.0);
+  hoverZTargets.set(m, 0);
+  cardRenderOrder(m, 0);
+}
+
+// Calcola il mesh della griglia sotto il cursore in O(1) (no raycast)
+function meshAtCursor(cx, cy) {
+  const ndcX  = (cx / window.innerWidth)  * 2 - 1;
+  const ndcY  = 1 - (cy / window.innerHeight) * 2;
+  const tanHV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const cz    = camera.position.z;
+  const wx    = camera.position.x + ndcX * tanHV * cz * camera.aspect;
+  // worldY nel sistema locale di grp (sottrae l'offset della fluttuazione)
+  const wy    = camera.position.y + ndcY * tanHV * cz - grp.position.y;
+  const col   = Math.floor((wx - OX) / CELL_W);
+  const row   = Math.floor((OY - wy) / CELL_H);
+  if (col < 0 || col >= CFG.COLS || row < 0 || row >= CFG.ROWS) return null;
+  return meshGrid[row * CFG.COLS + col];   // null se la cella è skip
+}
+
+function updateHover(cx, cy) {
+  if (zoomedMesh || dragging) return;
+  const now = performance.now();
+  if (now - hoverThrottle < 30) return;
+  hoverThrottle = now;
+
+  const hit = meshAtCursor(cx, cy);
+  if (hit !== hoveredMesh) {
+    // Riporta indietro il mesh che stava in hover
+    clearHoverMesh(hoveredMesh);
+    if (hit) {
+      hoverTargets.set(hit, CFG.HOVER_SCL);
+      hoverZTargets.set(hit, HOVER_Z);
+      cardRenderOrder(hit, 3);    // sopra le carte normali (0)
+      setCanvasCursor('zoomin');
+    } else {
+      setCanvasCursor('grab');
+    }
+    hoveredMesh = hit;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Loop di animazione
+   ══════════════════════════════════════════════════════════════ */
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  /* ── Frecce tastiera (solo navigazione normale) ── */
+  if (!zoomedMesh) {
+    if (KEYS['ArrowLeft']  || KEYS['a'])
+      camTargetX = clampX(camTargetX - CFG.NAV_STEP * 60 * dt);
+    if (KEYS['ArrowRight'] || KEYS['d'])
+      camTargetX = clampX(camTargetX + CFG.NAV_STEP * 60 * dt);
+    if (KEYS['ArrowUp']    || KEYS['w'])
+      camTargetY = clampY(camTargetY + CFG.NAV_STEP * 60 * dt);
+    if (KEYS['ArrowDown']  || KEYS['s'])
+      camTargetY = clampY(camTargetY - CFG.NAV_STEP * 60 * dt);
+  }
+
+  /* ── Inerzia drag (solo navigazione normale) — frame-rate independent ── */
+  if (!dragging && !zoomedMesh) {
+    const decay = Math.pow(CFG.INERTIA, dt * 60);
+    velX      *= decay;
+    velY      *= decay;
+    camTargetX = clampX(camTargetX + velX, camTargetZ);
+    camTargetY = clampY(camTargetY + velY, camTargetZ);
+    if (Math.abs(velX) < 5e-5) velX = 0;
+    if (Math.abs(velY) < 5e-5) velY = 0;
+  }
+
+  /* ── Smooth camera — frame-rate independent ── */
+  const lx = zoomedMesh ? CFG.LERP_ZOOM : CFG.LERP_NAV;
+  const lz = zoomedMesh ? 0.05 : 0.08;
+  camera.position.x = lerpDt(camera.position.x, camTargetX, lx, dt);
+  camera.position.y = lerpDt(camera.position.y, camTargetY, lx, dt);
+  camera.position.z = lerpDt(camera.position.z, camTargetZ, lz, dt);
+
+  /* ── Fluttuazione verticale (solo normale) ── */
+  if (!zoomedMesh) {
+    grp.position.y = Math.sin(clock.elapsedTime * Math.PI * 2 * CFG.FLOAT_SPD) * CFG.FLOAT_AMP;
+  } else {
+    grp.position.y = lerp(grp.position.y, 0, 0.1); // ferma il float
+  }
+
+  /* ── Hover scale ── */
+  hoverTargets.forEach((tgt, m) => {
+    const s = lerp(m.scale.x, tgt, 0.15);
+    m.scale.setScalar(s);
+    if (Math.abs(s - tgt) < 8e-4) { m.scale.setScalar(tgt); hoverTargets.delete(m); }
+  });
+
+  /* ── Hover z-elevation ── */
+  hoverZTargets.forEach((tgt, m) => {
+    const newZ = lerp(m.position.z, tgt, 0.15);
+    m.position.z = newZ;
+    if (Math.abs(newZ - tgt) < 0.001) {
+      m.position.z = tgt;
+      hoverZTargets.delete(m);
+    }
+  });
+
+  /* ── Dimming: attivo solo durante e dopo uno zoom ── */
+  if (dimmingActive) {
+    let settled = true;
+    for (const card of cards) {
+      const tgt = (zoomedMesh && card !== zoomedMesh) ? COLOR_DIM : COLOR_FULL;
+      for (const p of card.userData.planes) p.material.color.lerp(tgt, 0.08);
+      if (Math.abs(card.userData.planes[0].material.color.r - tgt.r) > 0.002) settled = false;
+    }
+    if (settled) dimmingActive = false;
+  }
+
+  /* ── Carta attiva: pop in avanti + flip 3D verso il lato scelto ── */
+  const ACTIVE_Z = 0.06;   // quanto sporge davanti alle carte contigue
+  if (zoomedMesh) {
+    zoomedMesh.position.z = lerp(zoomedMesh.position.z, ACTIVE_Z, 0.14);
+    zoomedMesh.rotation.y = lerp(zoomedMesh.rotation.y, zoomedMesh.userData.flip * Math.PI, 0.16);
+  }
+  // Carta che torna in griglia: rientra a z=0 e si rigira sul fronte
+  if (returningMesh && returningMesh !== zoomedMesh) {
+    returningMesh.position.z = lerp(returningMesh.position.z, 0, 0.14);
+    returningMesh.rotation.y = lerp(returningMesh.rotation.y, 0, 0.16);
+    if (Math.abs(returningMesh.position.z) < 0.001 && Math.abs(returningMesh.rotation.y) < 0.01) {
+      returningMesh.position.z = 0;
+      returningMesh.rotation.y = 0;
+      releaseFullRes(returningMesh);   // libera la VRAM del full-res
+      returningMesh = null;
+    }
+  }
+
+  updateScrubber();   // allinea la manopola alla posizione orizzontale corrente
+
+  renderer.render(scene, camera);
+}
+animate();
+
+/* ══════════════════════════════════════════════════════════════
+   Resize
+   ══════════════════════════════════════════════════════════════ */
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (!zoomedMesh) camTargetX = clampX(camTargetX);
+  // se zoommati, ricalcola il fit-Z per il nuovo aspect ratio
+  if (zoomedMesh) camTargetZ = fitZForMesh();
+});
+</script>
+</body>
+</html>

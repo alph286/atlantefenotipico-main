@@ -1,0 +1,9 @@
+# Cartella sorgente locale
+src/
+
+# File Python
+*.py
+*.pyc
+*.pyo
+__pycache__/
+CLAUDE.md
