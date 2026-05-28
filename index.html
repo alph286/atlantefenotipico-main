@@ -376,10 +376,11 @@ const CFG = {
   //   Cella (0,1) → soggetto 1 → fronte 003 / retro 004 …
 
   // Camera
-  CAM_Z    :  7,    // distanza iniziale
+  CAM_Z    :  5,    // distanza iniziale (centro tra GRID_MIN e MAX)
   CAM_FOV  : 55,    // FOV verticale (°)
-  CAM_Z_MIN: 0.4,   // limite zoom in
-  CAM_Z_MAX: 16,    // limite zoom out
+  CAM_Z_MIN: 0.4,   // limite zoom in (per dettaglio)
+  CAM_Z_MAX: 6,   // limite zoom out (griglia più stretta)
+  CAM_Z_GRID_MIN: 4,  // limite zoom in griglia (griglia più allargata)
 
   // Navigazione
   NAV_STEP  : 0.25, // passo pulsanti freccia
@@ -855,9 +856,8 @@ const detLabel = document.getElementById('det-label');
 const detKind  = document.getElementById('det-kind');
 function updateZoomHUD() {
   if (!zoomedMesh) return;
-  const { row, col, flip } = zoomedMesh.userData;
-  detLabel.textContent = imgLabelN(flip ? backNum(row, col) : frontNum(row, col));
-  detKind.textContent  = flip ? 'Identikit' : 'Presentazione';
+  detLabel.textContent = '';
+  detKind.textContent  = '';
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -884,7 +884,6 @@ let frameVelY    = 0;
 canvas.addEventListener('mousedown', (e) => {
   dragStartPx  = e.clientX;  // aggiorna sempre: serve al click handler per distinguere click da drag
   dragStartPxY = e.clientY;
-  if (zoomedMesh) return;   // drag disabilitato quando zoommati
   dragging = true;
   dragStartCamX = camTargetX;
   dragStartCamY = camTargetY;
@@ -900,13 +899,31 @@ window.addEventListener('mousemove', (e) => {
   }
   const dPx    = e.clientX - dragStartPx;
   const dWorld = (dPx / window.innerWidth) * halfViewX() * 2;
-  const nx     = clampX(dragStartCamX - dWorld);
+  let nx       = dragStartCamX - dWorld;
+
+  if (zoomedMesh) {
+    // Nel dettaglio: limita il movimento fino a metà dell'immagine adiacente
+    const card = zoomedMesh;
+    const marginX = CFG.IMG_W * 0.75;  // fino a metà immagine adiacente
+    nx = Math.max(card.position.x - marginX, Math.min(card.position.x + marginX, nx));
+  } else {
+    nx = clampX(nx);
+  }
   frameVelX    = nx - camTargetX;
   camTargetX   = nx;
 
   const dPxY    = e.clientY - dragStartPxY;
   const dWorldY = (dPxY / window.innerHeight) * halfViewY() * 2;
-  const ny      = clampY(dragStartCamY + dWorldY);  // trascini giù → la griglia scende
+  let ny        = dragStartCamY + dWorldY;  // trascini giù → la griglia scende
+
+  if (zoomedMesh) {
+    // Nel dettaglio: limita il movimento fino a metà dell'immagine adiacente
+    const card = zoomedMesh;
+    const marginY = CFG.IMG_H * 0.75;  // fino a metà immagine adiacente
+    ny = Math.max(card.position.y - marginY, Math.min(card.position.y + marginY, ny));
+  } else {
+    ny = clampY(ny);
+  }
   frameVelY     = ny - camTargetY;
   camTargetY    = ny;
 });
@@ -1024,7 +1041,8 @@ canvas.addEventListener('touchend', (e) => {
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   const oldZ = camTargetZ;
-  const newZ = Math.max(CFG.CAM_Z_MIN, Math.min(CFG.CAM_Z_MAX, oldZ + e.deltaY * 0.009));
+  const zMin = zoomedMesh ? CFG.CAM_Z_MIN : CFG.CAM_Z_GRID_MIN;
+  const newZ = Math.max(zMin, Math.min(CFG.CAM_Z_MAX, oldZ + e.deltaY * 0.009));
   if (newZ === oldZ) return;
 
   // In entrambe le modalità (normale e immagine attiva): zoom verso il cursore.
@@ -1127,22 +1145,32 @@ function updateScrubber() {
   scrubFill.style.width = (f * 100) + '%';
   scrubKnob.style.left  = (f * 100) + '%';
 }
-// Da posizione cursore sul binario → camTargetX.
+// Da posizione cursore sul binario → camTargetX (griglia) o navigazione (dettaglio).
 function scrubToClientX(clientX) {
   const r = scrubEl.getBoundingClientRect();
   const f = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
-  const { mn, mx } = scrubBounds();
-  if (mx <= mn) return;
-  camTargetX = clampX(mn + f * (mx - mn));
-  velX = 0;
   lastScrubF = -1; updateScrubberForce(f);
+
+  if (zoomedMesh) {
+    // Nel dettaglio: naviga tra i soggetti
+    const subjectIndex = Math.round(f * (CFG.NUM_SUBJECTS - 1));
+    const row = Math.floor(subjectIndex / CFG.COLS);
+    const col = subjectIndex % CFG.COLS;
+    const card = meshGrid[row * CFG.COLS + col];
+    if (card) zoomTo(card);
+  } else {
+    // Nella griglia: controlla la camera X
+    const { mn, mx } = scrubBounds();
+    if (mx <= mn) return;
+    camTargetX = clampX(mn + f * (mx - mn));
+    velX = 0;
+  }
 }
 function updateScrubberForce(f) {
   scrubFill.style.width = (f * 100) + '%';
   scrubKnob.style.left  = (f * 100) + '%';
 }
 scrubEl.addEventListener('pointerdown', (e) => {
-  if (zoomedMesh) return;
   scrubbing = true; scrubEl.classList.add('dragging');
   scrubEl.setPointerCapture(e.pointerId);
   scrubToClientX(e.clientX);
