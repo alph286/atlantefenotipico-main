@@ -787,8 +787,8 @@ function hideLoading() {
   // Intro pull-back
   camera.position.z = CFG.CAM_Z + 3;
   camTargetZ = CFG.CAM_Z;
-  // Mostra la legenda all'avvio
-  setTimeout(() => { document.getElementById('legend').classList.add('on'); }, 400);
+  // Mostra la legenda all'avvio con delay
+  setTimeout(() => { toggleLegend(true); }, 400);
 }
 
 function loadBatch(start) {
