@@ -283,12 +283,32 @@
       color: var(--teal); font-size: .66rem; font-weight: 600;
     }
 
+    /* ── Close button (X angolo) – solo dettaglio mobile ── */
+    #zoom-close-btn {
+      position: fixed; top: 72px; right: 1rem; z-index: 20;
+      width: 28px; height: 28px; padding: 0;
+      background: transparent; border: none;
+      color: var(--teal); font-size: 1.6rem; line-height: 1;
+      cursor: pointer; display: none;
+      transition: color .18s;
+    }
+    #zoom-close-btn:hover {
+      color: var(--lime);
+    }
+
     /* ─── Responsive ──────────────────────────────────── */
     @media (max-width: 560px) {
       .brand-sub { display: none; }
+      .brand-mark em { display: block; }
       #topbar { height: 56px; }
       #deck { height: 70px; }
       .deck-browse { width: 88vw; }
+      .ld-text-outline, .ld-text-fill {
+        font-size: clamp(28px, 6vw, 40px);
+      }
+      body.zoomed #zoom-close-btn {
+        display: flex; align-items: center; justify-content: center;
+      }
     }
   </style>
 </head>
@@ -319,6 +339,9 @@
 
 <!-- Vignette -->
 <div id="vignette"></div>
+
+<!-- Close button (X angolo – solo mobile dettaglio) -->
+<button id="zoom-close-btn" aria-label="Chiudi">✕</button>
 
 <!-- Barra superiore -->
 <header id="topbar">
@@ -358,12 +381,11 @@
   <div class="legend-card">
     <button class="legend-close" aria-label="Chiudi">×</button>
     <h2>Come navigare</h2>
-    <ul>
+    <ul id="legend-list">
       <li><b>Trascina</b> Esplora la griglia</li>
-      <li><b>Rotella</b> Avvicina / allontana</li>
+      <li id="zoom-item"><b>Rotella</b> Avvicina / allontana</li>
       <li><b>Click</b> Apri una scheda · cliccala per girarla</li>
-      <li><b>Spazio</b> Gira la scheda (fronte &harr; retro)</li>
-      <li><b>&#8592; &#8594;</b> Soggetto precedente / successivo</li>
+      <li id="nav-item"><b>&#8592; &#8594;</b> Soggetto precedente / successivo</li>
     </ul>
   </div>
 </div>
@@ -434,6 +456,9 @@ const CFG = {
 
 const TOTAL = CFG.TOTAL_IMGS;  // immagini reali (celle oltre questo valore non vengono create)
 const TEST  = new URLSearchParams(location.search).has('test');
+
+// Rilevamento dispositivo mobile
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
 // Pannelloni: distribuiti nella griglia
 const PANNELLONI = [
@@ -1098,6 +1123,17 @@ canvas.addEventListener('touchstart', (e) => {
   }
 }, { passive: false });
 
+// Variabili per swipe nel dettaglio (mobile)
+let swipeStartX = 0;
+let swipeStartY = 0;
+
+canvas.addEventListener('touchstart', (e) => {
+  if (zoomedMesh && isMobile && e.touches.length === 1) {
+    swipeStartX = e.touches[0].clientX;
+    swipeStartY = e.touches[0].clientY;
+  }
+}, { passive: false });
+
 canvas.addEventListener('touchmove', (e) => {
   e.preventDefault();
   if (e.touches.length === 1 && !zoomedMesh) {
@@ -1120,23 +1156,62 @@ canvas.addEventListener('touchmove', (e) => {
       e.touches[0].clientX - e.touches[1].clientX,
       e.touches[0].clientY - e.touches[1].clientY
     );
-    camTargetZ = Math.max(CFG.CAM_Z_MIN, Math.min(CFG.CAM_Z_MAX, pinchZ0 * (pinchDist0 / d)));
+    const newZ = pinchZ0 * (pinchDist0 / d);
+    camTargetZ = Math.max(CFG.CAM_Z_MIN, Math.min(CFG.CAM_Z_MAX, newZ));
+
+    // Mobile: quando si raggiunge zoom out massimo dal dettaglio, chiudi la vista
+    if (zoomedMesh && isMobile && camTargetZ === CFG.CAM_Z_MAX && newZ > CFG.CAM_Z_MAX) {
+      savedCam = null;
+      clearHoverMesh(hoveredMesh);
+      hoveredMesh = null;
+      zoomedMesh.userData.flip = 0;
+      returningMesh = zoomedMesh;
+      zoomedMesh = null;
+      dimmingActive = true;
+      setCanvasCursor('grab');
+      document.getElementById('vignette').classList.remove('dimmed');
+      document.body.classList.remove('zoomed');
+    }
+
     if (!zoomedMesh) { camTargetX = clampX(camTargetX); camTargetY = clampY(camTargetY); }
   }
 }, { passive: false });
 
 canvas.addEventListener('touchend', (e) => {
   e.preventDefault();
-  if (touchIsClick && Date.now() - touchT0 < 320) {
+
+  if (zoomedMesh && isMobile && e.changedTouches.length === 1) {
+    // Dettaglio mobile: swipe per navigare e tap per flipare
+    const t = e.changedTouches[0];
+    const dX = t.clientX - swipeStartX;
+    const dY = t.clientY - swipeStartY;
+    const distance = Math.sqrt(dX * dX + dY * dY);
+    const timeDiff = Date.now() - touchT0;
+
+    // Swipe orizzontale (> 50px e < 300ms)
+    if (Math.abs(dX) > 50 && Math.abs(dX) > Math.abs(dY) && timeDiff < 300) {
+      if (dX > 0) navigateCard(0, -1);  // Swipe destra → soggetto precedente
+      else        navigateCard(0, +1);  // Swipe sinistra → soggetto successivo
+    }
+    // Swipe verticale (> 50px e < 300ms)
+    else if (Math.abs(dY) > 50 && Math.abs(dY) > Math.abs(dX) && timeDiff < 300) {
+      if (dY > 0) navigateCard(-1, 0);  // Swipe giù → soggetto sopra
+      else        navigateCard(+1, 0);  // Swipe su → soggetto sotto
+    }
+    // Tap semplice (< 10px movimento)
+    else if (distance < 10 && timeDiff < 300 && !zoomedMesh.userData.isPannellone) {
+      flipCard();
+    }
+  } else if (touchIsClick && Date.now() - touchT0 < 320) {
     const t = e.changedTouches[0];
     if (zoomedMesh) {
       const card = cardAtRay(t.clientX, t.clientY);
-      if (card === zoomedMesh) flipCard();
-      else if (card)           zoomTo(card);
+      if (card === zoomedMesh && !card.userData.isPannellone) flipCard();
+      else if (card && !card.userData.isPannellone)           zoomTo(card);
       else                     unzoom();
     } else {
       const card = cardAtRay(t.clientX, t.clientY);
-      if (card) zoomTo(card);
+      if (card && !card.userData.isPannellone) zoomTo(card);
     }
   } else if (!zoomedMesh) {
     velX = touchVel;
@@ -1214,10 +1289,20 @@ document.getElementById('det-prev').addEventListener('click', () => navigateCard
 document.getElementById('det-next').addEventListener('click', () => navigateCard(0, +1));
 document.getElementById('det-flip').addEventListener('click', () => flipCard());
 document.getElementById('det-close').addEventListener('click', unzoom);
+if (isMobile) document.getElementById('zoom-close-btn').addEventListener('click', unzoom);
 
 /* ── Legenda comandi (?) ── */
 const legendEl = document.getElementById('legend');
 let legendHasBeenOpenedBefore = false;
+
+// Adatta legenda per mobile
+if (isMobile) {
+  const zoomItem = document.getElementById('zoom-item');
+  const navItem = document.getElementById('nav-item');
+  if (zoomItem) zoomItem.innerHTML = '<b>Zoom</b> Avvicina / allontana';
+  if (navItem) navItem.innerHTML = '<b>Sposta</b> Tra i soggetti';
+}
+
 function toggleLegend(force) {
   const on = (force !== undefined) ? force : !legendEl.classList.contains('on');
   legendEl.classList.toggle('on', on);
