@@ -75,26 +75,33 @@
       transition: opacity 0.9s ease;
     }
     #loading.fade-out { opacity: 0; pointer-events: none; }
-    .ld-title {
-      font-size: clamp(.85rem, 2.5vw, 1.25rem);
-      font-weight: 300; letter-spacing: .45em;
-      text-transform: uppercase;
-      color: #d9f800;
+    .ld-title-container {
       margin-bottom: 2.4rem;
+      width: clamp(200px, 85vw, 900px);
     }
-    .ld-bar-wrap {
-      width: min(260px, 55vw); height: 1px;
-      background: rgba(37,150,190,.18); overflow: hidden;
+    .ld-title-svg {
+      width: 100%;
+      height: auto;
+      display: block;
     }
-    .ld-bar {
-      height: 100%; width: 0%;
-      background: linear-gradient(90deg, #2596be, #ee15ef 55%, #d9f800);
-      transition: width .2s linear;
+    .ld-text-outline {
+      font-size: clamp(20px, 3.5vw, 32px);
+      font-weight: 300;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+      stroke: #d9f800;
+      stroke-width: 0.1;
+      fill: none;
+    }
+    .ld-text-fill {
+      font-size: clamp(20px, 3.5vw, 32px);
+      font-weight: 300;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+      fill: #d9f800;
     }
     .ld-info {
-      margin-top: 1.1rem; font-size: .62rem;
-      letter-spacing: .22em; text-transform: uppercase;
-      color: rgba(37,150,190,.6);
+      display: none;
     }
 
     /* ════════ Chrome: barre con scrim (entrano dopo il load) ════════ */
@@ -141,12 +148,8 @@
 
     /* ── Deck inferiore ── */
     #deck {
-      bottom: 0; height: 78px; justify-content: center; gap: 1rem;
-      transform: translateY(14px);
-      background: linear-gradient(0deg, rgba(6,20,27,.85) 0%, rgba(6,20,27,0) 100%);
-      border-top: 1px solid var(--teal-22);
+      display: none;
     }
-    body.ready #deck { transform: translateY(0); }
 
     /* stepper (‹ ›) e nav dettaglio: stile condiviso */
     .deck-step, .deck-nav, #det-close, #det-flip {
@@ -241,14 +244,32 @@
     }
     #legend.on { opacity: 1; pointer-events: auto; }
     .legend-card {
+      position: relative;
       max-width: min(440px, 86vw);
       background: rgba(8,22,30,.96); border: 1px solid var(--teal-40);
       border-radius: 14px; padding: 1.6rem 1.8rem;
       box-shadow: 0 24px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(37,150,190,.08);
     }
+    .legend-close {
+      position: absolute; top: 0.55rem; right: 1rem;
+      color: var(--teal); font-size: 1.8rem;
+      cursor: pointer; background: none; border: none; padding: 0;
+      opacity: 0; transition: opacity .3s ease;
+    }
+    #legend.on .legend-close {
+      opacity: 1;
+      transition: opacity .3s ease;
+    }
+    #legend.legend-first-open .legend-close {
+      transition: opacity .3s ease .5s;
+    }
+    .legend-close:hover {
+      color: var(--lime);
+    }
     .legend-card h2 {
       font-size: .68rem; font-weight: 600; letter-spacing: .3em;
       text-transform: uppercase; color: var(--lime); margin-bottom: 1.1rem;
+      text-align: center;
     }
     .legend-card ul { list-style: none; display: grid; gap: .65rem; }
     .legend-card li {
@@ -275,9 +296,22 @@
 
 <!-- Loading -->
 <div id="loading">
-  <div class="ld-title">Atlante Fenotipico di Comunità</div>
-  <div class="ld-bar-wrap"><div class="ld-bar" id="ld-bar"></div></div>
-  <div class="ld-info"    id="ld-info">Inizializzazione…</div>
+  <div class="ld-title-container">
+    <svg class="ld-title-svg" viewBox="0 0 1000 120" preserveAspectRatio="xMidYMid meet">
+      <text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" class="ld-text-outline">
+        ATLANTE FENOTIPICO DI COMUNITÀ
+      </text>
+      <defs>
+        <clipPath id="progress-clip">
+          <rect x="0" y="0" width="0" height="120" id="progress-rect"/>
+        </clipPath>
+      </defs>
+      <text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" class="ld-text-fill" clip-path="url(#progress-clip)">
+        ATLANTE FENOTIPICO DI COMUNITÀ
+      </text>
+    </svg>
+  </div>
+  <div class="ld-info" id="ld-info">Inizializzazione…</div>
 </div>
 
 <!-- 3-D canvas -->
@@ -322,14 +356,14 @@
 <!-- Legenda comandi -->
 <div id="legend">
   <div class="legend-card">
+    <button class="legend-close" aria-label="Chiudi">×</button>
     <h2>Come navigare</h2>
     <ul>
       <li><b>Trascina</b> Esplora la griglia</li>
       <li><b>Rotella</b> Avvicina / allontana</li>
-      <li><b>Click</b> Apri una carta · cliccala per girarla</li>
-      <li><b>Spazio</b> Gira la carta (fronte &harr; retro)</li>
+      <li><b>Click</b> Apri una scheda · cliccala per girarla</li>
+      <li><b>Spazio</b> Gira la scheda (fronte &harr; retro)</li>
       <li><b>&#8592; &#8594;</b> Soggetto precedente / successivo</li>
-      <li><b>Esc</b> Chiudi</li>
     </ul>
   </div>
 </div>
@@ -345,9 +379,9 @@
    ══════════════════════════════════════════════════════════════ */
 const CFG = {
   // Una CELLA = un SOGGETTO = una carta fronte-retro.
-  // 113 soggetti (226 immagini / 2) su griglia 15×8 = 120 celle, 7 vuote in fondo.
+  // 113 soggetti (226 immagini / 2) + pannelloni su griglia 15×10 = 150 celle.
   COLS : 15,
-  ROWS : 8,
+  ROWS : 10,
 
   // Immagini totali in images/ e soggetti (coppie fronte+retro).
   TOTAL_IMGS  : 226,
@@ -400,6 +434,29 @@ const CFG = {
 
 const TOTAL = CFG.TOTAL_IMGS;  // immagini reali (celle oltre questo valore non vengono create)
 const TEST  = new URLSearchParams(location.search).has('test');
+
+// Pannelloni: distribuiti nella griglia
+const PANNELLONI = [
+  { name: 'dovesihannoipiedi', cols: 2, rows: 4, row: 0, col: 0 },
+  { name: 'ognitanto', cols: 2, rows: 2, row: 0, col: 6 },
+  { name: 'perandarevia', cols: 2, rows: 2, row: 3, col: 11 },
+  { name: 'unmondopossibile', cols: 2, rows: 2, row: 4, col: 4 }
+];
+
+// Mappa celle occupate da pannelloni
+function isPannelloneCell(row, col) {
+  for (const p of PANNELLONI) {
+    if (row >= p.row && row < p.row + p.rows && col >= p.col && col < p.col + p.cols) {
+      return p;
+    }
+  }
+  return null;
+}
+
+// Verifica se è la cella principale (top-left) di un pannellone
+function getPannelloneAtCell(row, col) {
+  return PANNELLONI.find(p => p.row === row && p.col === col) || null;
+}
 
 /* ══════════════════════════════════════════════════════════════
    Utility
@@ -514,6 +571,7 @@ function makeTestTex(n) {
 
 const geo    = new THREE.PlaneGeometry(CFG.IMG_W, CFG.IMG_H);
 const grp    = new THREE.Group();
+const gridTiles = [];  // Contenitori delle copie della griglia
 scene.add(grp);
 
 // Una CARTA = THREE.Group con due piani: fronte (rot.y 0) e retro (rot.y π).
@@ -524,30 +582,68 @@ const planes    = [];   // 226 piani  (caricamento texture)
 // Lookup O(1): meshGrid[row * CFG.COLS + col] → carta (null se la cella è vuota)
 const meshGrid  = new Array(CFG.ROWS * CFG.COLS).fill(null);
 
+// Primo: crea i pannelloni
+for (const pannello of PANNELLONI) {
+  const pw = pannello.cols * CFG.IMG_W;
+  const ph = pannello.rows * CFG.IMG_H;
+  const pGeo = new THREE.PlaneGeometry(pw, ph);
+  const pCard = new THREE.Group();
+  const x = OX + pannello.col * CELL_W + pw / 2;
+  const y = OY - pannello.row * CELL_H - ph / 2;
+  pCard.position.set(x, y, 0);
+
+  const pFront = new THREE.Mesh(pGeo, new THREE.MeshBasicMaterial({ map: phTex }));
+  const pBack = new THREE.Mesh(pGeo, new THREE.MeshBasicMaterial({ map: phTex }));
+  pBack.rotation.y = Math.PI;
+
+  pFront.userData = { card: pCard, file: -1, side: 'front', isPannellone: true, name: pannello.name };
+  pBack.userData = { card: pCard, file: -1, side: 'back', isPannellone: true, name: pannello.name };
+
+  pCard.add(pFront); pCard.add(pBack);
+  pCard.userData = { row: pannello.row, col: pannello.col, flip: 0, planes: [pFront, pBack], isPannellone: true, name: pannello.name };
+
+  grp.add(pCard);
+  cards.push(pCard);
+  planes.push(pFront, pBack);
+  meshGrid[pannello.row * CFG.COLS + pannello.col] = pCard;
+}
+
+// Secondo: raccogli le posizioni disponibili (non occupate da pannelloni)
+const availablePositions = [];
 for (let row = 0; row < CFG.ROWS; row++) {
   for (let col = 0; col < CFG.COLS; col++) {
-    if (subjectAt(row, col) >= CFG.NUM_SUBJECTS) continue;   // cella vuota
-    const x = OX + col * CELL_W + CFG.IMG_W / 2;
-    const y = OY - row * CELL_H - CFG.IMG_H / 2;
-
-    const card  = new THREE.Group();
-    card.position.set(x, y, 0);
-
-    const front = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: phTex }));
-    const back  = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: phTex }));
-    back.rotation.y = Math.PI;   // guarda dal lato opposto
-
-    front.userData = { card, file: frontNum(row, col), side: 'front' };
-    back.userData  = { card, file: backNum(row, col),  side: 'back'  };
-
-    card.add(front); card.add(back);
-    card.userData = { row, col, flip: 0, planes: [front, back] };
-
-    grp.add(card);
-    cards.push(card);
-    planes.push(front, back);
-    meshGrid[row * CFG.COLS + col] = card;
+    if (!isPannelloneCell(row, col)) {
+      availablePositions.push({ row, col });
+    }
   }
+}
+
+// Terzo: crea carte solo per i soggetti disponibili (resto rimane vuoto)
+for (let i = 0; i < Math.min(CFG.NUM_SUBJECTS, availablePositions.length); i++) {
+  const pos = availablePositions[i];
+  const row = pos.row;
+  const col = pos.col;
+  const x = OX + col * CELL_W + CFG.IMG_W / 2;
+  const y = OY - row * CELL_H - CFG.IMG_H / 2;
+
+  const card  = new THREE.Group();
+  card.position.set(x, y, 0);
+
+  const front = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: phTex }));
+  const back  = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: phTex }));
+  back.rotation.y = Math.PI;
+
+  const subjectIdx = i;
+  front.userData = { card, file: subjectIdx * 2 + 1, side: 'front' };
+  back.userData  = { card, file: subjectIdx * 2 + 2, side: 'back'  };
+
+  card.add(front); card.add(back);
+  card.userData = { row, col, flip: 0, planes: [front, back] };
+
+  grp.add(card);
+  cards.push(card);
+  planes.push(front, back);
+  meshGrid[row * CFG.COLS + col] = card;
 }
 
 // Helper: applica un'azione a entrambi i piani di una carta.
@@ -563,8 +659,8 @@ const COLOR_DIM  = new THREE.Color(0.28, 0.28, 0.28);
    Caricamento texture
    ══════════════════════════════════════════════════════════════ */
 const texLoader  = new THREE.TextureLoader();
-const ldBar      = document.getElementById('ld-bar');
 const ldInfo     = document.getElementById('ld-info');
+const ldProgressRect = document.getElementById('progress-rect');
 let   loadedN    = 0;
 let   failedURLs = [];   // raccoglie i percorsi che non caricano
 
@@ -603,9 +699,11 @@ function onTexDone(plane, tex, url) {
     plane.userData.thumbTex = errTex;
   }
   loadedN++;
-  ldBar.style.width = (loadedN / TOTAL * 100).toFixed(1) + '%';
-  ldInfo.textContent = loadedN + ' / ' + TOTAL;
-  if (loadedN >= TOTAL) setTimeout(onAllLoaded, 300);
+  if (ldProgressRect) {
+    ldProgressRect.setAttribute('width', (1000 * loadedN / planes.length).toFixed(0));
+  }
+  ldInfo.textContent = loadedN + ' / ' + planes.length;
+  if (loadedN >= planes.length) setTimeout(onAllLoaded, 300);
 }
 
 function onAllLoaded() {
@@ -664,15 +762,27 @@ function hideLoading() {
   // Intro pull-back
   camera.position.z = CFG.CAM_Z + 3;
   camTargetZ = CFG.CAM_Z;
+  // Mostra la legenda all'avvio
+  setTimeout(() => { document.getElementById('legend').classList.add('on'); }, 400);
 }
 
 function loadBatch(start) {
-  const end = Math.min(start + CFG.BATCH_SIZE, TOTAL);
+  const end = Math.min(start + CFG.BATCH_SIZE, planes.length);
   for (let i = start; i < end; i++) {
-    const p   = planes[i];
-    const url = thumbSrcN(p.userData.file);
+    const p = planes[i];
+    let url;
+
+    if (p.userData.isPannellone) {
+      // Pannellone: cerca le dimensioni dal nome
+      const pannello = PANNELLONI.find(pn => pn.name === p.userData.name);
+      url = `images/pannelloni/${p.userData.name} ${pannello.cols}x${pannello.rows}.webp`;
+    } else {
+      // Carta singola
+      url = thumbSrcN(p.userData.file);
+    }
+
     if (TEST) {
-      onTexDone(p, makeTestTex(p.userData.file), url);
+      onTexDone(p, makeTestTex(p.userData.file || -1), url);
     } else {
       texLoader.load(
         url,
@@ -682,7 +792,7 @@ function loadBatch(start) {
       );
     }
   }
-  if (end < TOTAL) setTimeout(() => loadBatch(end), TEST ? 2 : CFG.BATCH_MS);
+  if (end < planes.length) setTimeout(() => loadBatch(end), TEST ? 2 : CFG.BATCH_MS);
 }
 
 // ── Rilevamento file:// prima ancora di iniziare ──────────────────────────
@@ -717,10 +827,9 @@ function halfViewY(z) {
 }
 function clampX(x, z) {
   const hv = halfViewX(z);
-  // bordo sinistro → bordo destro della griglia
-  const mn = OX       + hv;     // col 0 allineata al bordo sinistro della vista
-  const mx = OX + GRID_W - hv;  // col 49 allineata al bordo destro della vista
-  if (mn > mx) return 0;        // griglia più stretta del viewport
+  const mn = OX       + hv;
+  const mx = OX + GRID_W - hv;
+  if (mn > mx) return 0;
   return Math.max(mn, Math.min(mx, x));
 }
 function clampY(y, z) {
@@ -902,9 +1011,9 @@ window.addEventListener('mousemove', (e) => {
   let nx       = dragStartCamX - dWorld;
 
   if (zoomedMesh) {
-    // Nel dettaglio: limita il movimento fino a metà dell'immagine adiacente
+    // Nel dettaglio: limita il movimento con margine ristretto
     const card = zoomedMesh;
-    const marginX = CFG.IMG_W * 0.75;  // fino a metà immagine adiacente
+    const marginX = CFG.IMG_W * 0.6;
     nx = Math.max(card.position.x - marginX, Math.min(card.position.x + marginX, nx));
   } else {
     nx = clampX(nx);
@@ -917,9 +1026,9 @@ window.addEventListener('mousemove', (e) => {
   let ny        = dragStartCamY + dWorldY;  // trascini giù → la griglia scende
 
   if (zoomedMesh) {
-    // Nel dettaglio: limita il movimento fino a metà dell'immagine adiacente
+    // Nel dettaglio: limita il movimento con margine ristretto
     const card = zoomedMesh;
-    const marginY = CFG.IMG_H * 0.75;  // fino a metà immagine adiacente
+    const marginY = CFG.IMG_H * 0.6;
     ny = Math.max(card.position.y - marginY, Math.min(card.position.y + marginY, ny));
   } else {
     ny = clampY(ny);
@@ -949,7 +1058,7 @@ canvas.addEventListener('click', (e) => {
     return;
   }
   const card = cardAtRay(e.clientX, e.clientY);
-  if (card) zoomTo(card);
+  if (card && !card.userData.isPannellone) zoomTo(card);  // zoom solo per carte singole
 });
 
 /* ══════════════════════════════════════════════════════════════
@@ -1108,11 +1217,22 @@ document.getElementById('det-close').addEventListener('click', unzoom);
 
 /* ── Legenda comandi (?) ── */
 const legendEl = document.getElementById('legend');
+let legendHasBeenOpenedBefore = false;
 function toggleLegend(force) {
   const on = (force !== undefined) ? force : !legendEl.classList.contains('on');
   legendEl.classList.toggle('on', on);
+
+  if (on && !legendHasBeenOpenedBefore) {
+    // Prima apertura (automatica all'avvio)
+    legendEl.classList.add('legend-first-open');
+    legendHasBeenOpenedBefore = true;
+  } else if (on) {
+    // Riaperture (manuali dal ?)
+    legendEl.classList.remove('legend-first-open');
+  }
 }
 document.getElementById('help-btn').addEventListener('click', () => toggleLegend());
+document.querySelector('.legend-close').addEventListener('click', () => toggleLegend(false));
 legendEl.addEventListener('click', () => toggleLegend(false));   // click fuori dalla card chiude
 legendEl.querySelector('.legend-card').addEventListener('click', (e) => e.stopPropagation());
 
@@ -1225,7 +1345,12 @@ function cardAtRay(cx, cy) {
   nd.y = -(cy / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(nd, camera);
   const hits = raycaster.intersectObjects(planes);
-  return hits.length ? hits[0].object.userData.card : null;
+  if (hits.length) {
+    const card = hits[0].object.userData.card;
+    // Nei controlli di click, ignora i pannelloni se necessario
+    return card;
+  }
+  return null;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1271,7 +1396,7 @@ function updateHover(cx, cy) {
   if (hit !== hoveredMesh) {
     // Riporta indietro il mesh che stava in hover
     clearHoverMesh(hoveredMesh);
-    if (hit) {
+    if (hit && !hit.userData.isPannellone) {
       hoverTargets.set(hit, CFG.HOVER_SCL);
       hoverZTargets.set(hit, HOVER_Z);
       cardRenderOrder(hit, 3);    // sopra le carte normali (0)
@@ -1321,6 +1446,7 @@ function animate() {
   camera.position.x = lerpDt(camera.position.x, camTargetX, lx, dt);
   camera.position.y = lerpDt(camera.position.y, camTargetY, lx, dt);
   camera.position.z = lerpDt(camera.position.z, camTargetZ, lz, dt);
+
 
   /* ── Fluttuazione verticale (solo normale) ── */
   if (!zoomedMesh) {
