@@ -1409,8 +1409,8 @@ window.addEventListener('keydown', (e) => {
   if (zoomedMesh) {
     if (e.key === 'ArrowRight')      navigateCard(0, +1);   // soggetto successivo
     else if (e.key === 'ArrowLeft')  navigateCard(0, -1);   // soggetto precedente
-    else if (e.key === 'ArrowDown')  flipCard(1);           // mostra retro (identikit)
-    else if (e.key === 'ArrowUp')    flipCard(0);           // mostra fronte (presentazione)
+    else if (e.key === 'ArrowUp')    { if (!isMobile) navigateCard(-1, 0); else flipCard(0); }  // desktop: su riga; mobile: fronte
+    else if (e.key === 'ArrowDown')  { if (!isMobile) navigateCard(+1, 0); else flipCard(1); }  // desktop: giù riga; mobile: retro
     else if (e.key === ' ' || e.key === 'f' || e.key === 'F') flipCard();  // alterna
     e.preventDefault();
   }
