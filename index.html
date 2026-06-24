@@ -119,7 +119,6 @@
       top: 0; height: 64px; justify-content: space-between;
       transform: translateY(-14px);
       background: linear-gradient(180deg, rgba(6,20,27,.82) 0%, rgba(6,20,27,0) 100%);
-      border-bottom: 1px solid var(--teal-22);
     }
     body.ready #topbar { transform: translateY(0); }
     .brand { display: flex; flex-direction: column; gap: .18rem; line-height: 1; }
@@ -167,6 +166,12 @@
     .deck-nav:hover {
       background: rgba(238,21,239,.16); color: var(--magenta);
       border-color: rgba(238,21,239,.5); box-shadow: 0 0 16px rgba(238,21,239,.22);
+    }
+    /* toggle marquee attivo: resta acceso (lime) mentre scorre */
+    #marquee-toggle { font-size: .9rem; }
+    #marquee-toggle.on {
+      background: rgba(217,248,0,.2); color: var(--lime);
+      border-color: rgba(217,248,0,.7); box-shadow: 0 0 18px rgba(217,248,0,.35);
     }
     /* pulsante "Gira": azione primaria del dettaglio (lime) */
     #det-flip {
@@ -362,6 +367,7 @@
       <div id="scrub-knob"></div>
     </div>
     <button class="deck-step" id="step-next" aria-label="Sposta a destra">&#8250;</button>
+    <button class="deck-step" id="marquee-toggle" aria-label="Scorrimento automatico" title="Scorrimento automatico (S)" aria-pressed="false">&#9654;</button>
   </div>
   <!-- modalità dettaglio: zoom -->
   <div class="deck-detail">
@@ -386,6 +392,7 @@
       <li id="zoom-item"><b>Rotella</b> Avvicina / allontana</li>
       <li><b>Click</b> Apri una scheda · cliccala per girarla</li>
       <li id="nav-item"><b>&#8592; &#8594;</b> Soggetto precedente / successivo</li>
+      <li id="marquee-item"><b>S</b> Scorrimento automatico · ri-premi (o Esc) per fermare</li>
     </ul>
   </div>
 </div>
@@ -452,6 +459,10 @@ const CFG = {
   FLOAT_AMP : 0.035,// ampiezza fluttuazione verticale
   FLOAT_SPD : 0.38, // Hz
   HOVER_SCL : 1.05, // scala hover
+
+  // Marquee ("tapis roulant"): velocità di scorrimento orizzontale in unità mondo/sec.
+  // Moderata: una carta (IMG_W) attraversa lo schermo in qualche secondo.
+  MARQUEE_SPEED : 1.2,
 };
 
 const TOTAL = CFG.TOTAL_IMGS;  // immagini reali (celle oltre questo valore non vengono create)
@@ -625,7 +636,7 @@ for (const pannello of PANNELLONI) {
   pBack.userData = { card: pCard, file: -1, side: 'back', isPannellone: true, name: pannello.name };
 
   pCard.add(pFront); pCard.add(pBack);
-  pCard.userData = { row: pannello.row, col: pannello.col, flip: 0, planes: [pFront, pBack], isPannellone: true, name: pannello.name };
+  pCard.userData = { row: pannello.row, col: pannello.col, flip: 0, planes: [pFront, pBack], isPannellone: true, name: pannello.name, baseX: x };
 
   grp.add(pCard);
   cards.push(pCard);
@@ -663,7 +674,7 @@ for (let i = 0; i < Math.min(CFG.NUM_SUBJECTS, availablePositions.length); i++) 
   back.userData  = { card, file: subjectIdx * 2 + 2, side: 'back'  };
 
   card.add(front); card.add(back);
-  card.userData = { row, col, flip: 0, planes: [front, back] };
+  card.userData = { row, col, flip: 0, planes: [front, back], baseX: x };
 
   grp.add(card);
   cards.push(card);
@@ -837,6 +848,21 @@ let camTargetZ = CFG.CAM_Z;
 let velX = 0;   // inerzia orizzontale
 let velY = 0;   // inerzia verticale
 
+// Marquee ("tapis roulant"): scorrimento orizzontale infinito attivato/fermato con S.
+let marqueeActive = false;
+let marqueeOffset = 0;   // spostamento accumulato in unità mondo
+let marqueeEaseInTime = 0;   // tempo di inizio dell'ease-in
+let marqueeEaseOutTime = 0;  // tempo di inizio dell'ease-out (se != 0 è in fase di ease-out)
+let marqueeStopping = false;  // rimane true per un breve periodo dopo ease-out per evitare glitch
+const MARQUEE_EASE_DURATION = 0.5;   // durata ease in/out in secondi
+const MARQUEE_STOP_BUFFER = 0.1;     // buffer di ripresa dopo ease-out (secondi)
+
+// Funzione di easing: ease in-out quadratica
+function easeInOutQuad(t) {
+  // t è nel range [0, 1]
+  return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+}
+
 /* ──────────────────────────────────────────────────────────────
    Limiti orizzontali (X).
    Il clamp usa il z TARGET per avere limiti corretti anche
@@ -965,6 +991,48 @@ function unzoom() {
   document.body.classList.remove('zoomed');
 }
 
+// ── Marquee ("tapis roulant") ──────────────────────────────────
+// Scorrimento orizzontale infinito: ogni carta si muove e la sua X viene wrappata
+// modulo GRID_W (la griglia è contigua → loop senza cuciture visibili). La camera
+// resta ferma e gli input restano bloccati finché non si ripreme S.
+const marqueeBtn = document.getElementById('marquee-toggle');
+// Riflette lo stato sul pulsante del deck (icona ▶/⏸ + evidenziazione lime).
+// Chiamata sia dal click sul pulsante sia dal tasto S, così restano in sync.
+function syncMarqueeBtn() {
+  if (!marqueeBtn) return;
+  marqueeBtn.classList.toggle('on', marqueeActive);
+  marqueeBtn.setAttribute('aria-pressed', marqueeActive ? 'true' : 'false');
+  marqueeBtn.innerHTML = marqueeActive ? '&#10074;&#10074;' : '&#9654;';   // ❚❚ / ▶
+  marqueeBtn.title = marqueeActive ? 'Ferma scorrimento' : 'Scorrimento automatico (S)';
+}
+
+function startMarquee() {
+  if (zoomedMesh || returningMesh) return;   // solo dalla griglia, a riposo
+  // Azzera hover residuo e riporta ogni carta allo stato neutro (scala 1, z 0).
+  if (hoveredMesh) clearHoverMesh(hoveredMesh);
+  hoveredMesh = null;
+  hoverTargets.clear();
+  hoverZTargets.clear();
+  for (const c of cards) {
+    c.scale.setScalar(1);
+    c.position.z = 0;
+    cardRenderOrder(c, 0);
+  }
+  velX = 0; velY = 0;
+  // Mantiene marqueeOffset per continuare da dove si era fermato
+  marqueeActive = true;
+  marqueeEaseInTime = performance.now() / 1000;
+  marqueeEaseOutTime = 0;   // cancella qualsiasi ease-out precedente
+  setCanvasCursor('grab');
+  syncMarqueeBtn();
+}
+
+function stopMarquee() {
+  marqueeActive = false;
+  marqueeEaseOutTime = performance.now() / 1000;   // inizia l'ease-out
+  syncMarqueeBtn();
+}
+
 // Passa alla carta adiacente (soggetto prec/succ), saltando le celle vuote.
 function navigateCard(dRow, dCol) {
   if (!zoomedMesh) return;
@@ -1016,6 +1084,7 @@ let frameVelX    = 0;
 let frameVelY    = 0;
 
 canvas.addEventListener('mousedown', (e) => {
+  if (marqueeActive) return;
   dragStartPx  = e.clientX;  // aggiorna sempre: serve al click handler per distinguere click da drag
   dragStartPxY = e.clientY;
   dragging = true;
@@ -1027,6 +1096,7 @@ canvas.addEventListener('mousedown', (e) => {
 });
 
 window.addEventListener('mousemove', (e) => {
+  if (marqueeActive) return;
   if (!dragging) {
     updateHover(e.clientX, e.clientY);
     return;
@@ -1072,6 +1142,7 @@ window.addEventListener('mouseup', () => {
 
 /* ── Click ────────────────────────────────────────────────── */
 canvas.addEventListener('click', (e) => {
+  if (marqueeActive) return;
   // ignora se era un vero drag (su uno qualsiasi dei due assi)
   if (Math.abs(e.clientX - dragStartPx) > 5 || Math.abs(e.clientY - dragStartPxY) > 5) return;
 
@@ -1103,6 +1174,7 @@ let pinchZ0        = 0;
 
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
+  if (marqueeActive) return;
   if (e.touches.length === 1) {
     const t = e.touches[0];
     touchStartX    = t.clientX;
@@ -1136,6 +1208,7 @@ canvas.addEventListener('touchstart', (e) => {
 
 canvas.addEventListener('touchmove', (e) => {
   e.preventDefault();
+  if (marqueeActive) return;
   if (e.touches.length === 1 && !zoomedMesh) {
     const t      = e.touches[0];
     const dPx    = t.clientX - touchStartX;
@@ -1179,6 +1252,7 @@ canvas.addEventListener('touchmove', (e) => {
 
 canvas.addEventListener('touchend', (e) => {
   e.preventDefault();
+  if (marqueeActive) return;
 
   if (zoomedMesh && isMobile && e.changedTouches.length === 1) {
     // Dettaglio mobile: swipe per navigare e tap per flipare
@@ -1224,6 +1298,7 @@ canvas.addEventListener('touchend', (e) => {
    ══════════════════════════════════════════════════════════════ */
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
+  if (marqueeActive) return;
   const oldZ = camTargetZ;
   const zMin = zoomedMesh ? CFG.CAM_Z_MIN : CFG.CAM_Z_GRID_MIN;
   const newZ = Math.max(zMin, Math.min(CFG.CAM_Z_MAX, oldZ + e.deltaY * 0.009));
@@ -1269,9 +1344,10 @@ canvas.addEventListener('wheel', (e) => {
    ══════════════════════════════════════════════════════════════ */
 let navTimer = null;
 function startNav(dir) {
+  if (marqueeActive) return;
   stopNav();
   navTimer = setInterval(() => {
-    if (zoomedMesh) return;
+    if (zoomedMesh || marqueeActive) return;
     camTargetX = clampX(camTargetX + dir * CFG.NAV_STEP); velX = 0;
   }, 16);
 }
@@ -1283,6 +1359,11 @@ document.getElementById('step-next').addEventListener('mousedown', () => startNa
 document.getElementById('step-prev').addEventListener('touchstart', (e) => { e.preventDefault(); startNav(-1); }, {passive:false});
 document.getElementById('step-next').addEventListener('touchstart', (e) => { e.preventDefault(); startNav(+1); }, {passive:false});
 ['mouseup','touchend'].forEach(ev => window.addEventListener(ev, stopNav));
+
+// Toggle marquee dal deck (equivalente del tasto S; unico controllo su mobile).
+if (marqueeBtn) marqueeBtn.addEventListener('click', () => {
+  if (marqueeActive) stopMarquee(); else startMarquee();
+});
 
 /* ── Deck dettaglio: soggetto prec/succ · gira (fronte↔retro) · chiudi ── */
 document.getElementById('det-prev').addEventListener('click', () => navigateCard(0, -1));
@@ -1301,6 +1382,9 @@ if (isMobile) {
   const navItem = document.getElementById('nav-item');
   if (zoomItem) zoomItem.innerHTML = '<b>Zoom</b> Avvicina / allontana';
   if (navItem) navItem.innerHTML = '<b>Sposta</b> Tra i soggetti';
+  // Il marquee (tasto S) richiede una tastiera: nascondi la voce su mobile.
+  const marqueeItem = document.getElementById('marquee-item');
+  if (marqueeItem) marqueeItem.style.display = 'none';
 }
 
 function toggleLegend(force) {
@@ -1376,6 +1460,7 @@ function updateScrubberForce(f) {
   scrubKnob.style.left  = (f * 100) + '%';
 }
 scrubEl.addEventListener('pointerdown', (e) => {
+  if (marqueeActive) return;
   scrubbing = true; scrubEl.classList.add('dragging');
   scrubEl.setPointerCapture(e.pointerId);
   scrubToClientX(e.clientX);
@@ -1404,7 +1489,15 @@ window.addEventListener('keydown', (e) => {
   if (e.key === '?') { toggleLegend(); return; }
   if (e.key === 'Escape') {
     if (legendEl.classList.contains('on')) { toggleLegend(false); return; }
+    if (marqueeActive) { stopMarquee(); return; }
     unzoom(); return;
+  }
+  // S → avvia/ferma il marquee (solo dalla griglia, a legenda chiusa)
+  if (e.key === 's' || e.key === 'S') {
+    if (zoomedMesh || legendEl.classList.contains('on')) return;
+    if (marqueeActive) stopMarquee(); else startMarquee();
+    e.preventDefault();
+    return;
   }
   if (zoomedMesh) {
     if (e.key === 'ArrowRight')      navigateCard(0, +1);   // soggetto successivo
@@ -1465,9 +1558,10 @@ function meshAtCursor(cx, cy) {
   const wx    = camera.position.x + ndcX * tanHV * cz * camera.aspect;
   // worldY nel sistema locale di grp (sottrae l'offset della fluttuazione)
   const wy    = camera.position.y + ndcY * tanHV * cz - grp.position.y;
-  const col   = Math.floor((wx - OX) / CELL_W);
+  // Tiene conto di marqueeOffset per l'hover corretto anche quando il marquee è in pausa
+  const col   = ((Math.floor((wx - OX + marqueeOffset) / CELL_W) % CFG.COLS) + CFG.COLS) % CFG.COLS;
   const row   = Math.floor((OY - wy) / CELL_H);
-  if (col < 0 || col >= CFG.COLS || row < 0 || row >= CFG.ROWS) return null;
+  if (row < 0 || row >= CFG.ROWS) return null;
   return meshGrid[row * CFG.COLS + col];   // null se la cella è skip
 }
 
@@ -1502,20 +1596,64 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
 
+  /* ── Marquee ("tapis roulant"): scorrimento orizzontale infinito ── */
+  let marqueeSpeed = CFG.MARQUEE_SPEED;
+  
+  // Calcola il fattore di easing (ease-in o ease-out)
+  if (marqueeActive && marqueeEaseInTime > 0) {
+    const elapsedEaseIn = (performance.now() / 1000) - marqueeEaseInTime;
+    if (elapsedEaseIn < MARQUEE_EASE_DURATION) {
+      const t = elapsedEaseIn / MARQUEE_EASE_DURATION;
+      marqueeSpeed *= easeInOutQuad(t);
+    } else {
+      marqueeEaseInTime = 0;  // ease-in completato
+    }
+  }
+  
+  // Ease-out quando si ferma
+  if (marqueeEaseOutTime > 0 && !marqueeActive) {
+    const elapsedEaseOut = (performance.now() / 1000) - marqueeEaseOutTime;
+    if (elapsedEaseOut < MARQUEE_EASE_DURATION) {
+      const t = elapsedEaseOut / MARQUEE_EASE_DURATION;
+      marqueeSpeed = CFG.MARQUEE_SPEED * easeInOutQuad(1 - t);  // inverso: da 1 a 0
+    } else {
+      marqueeEaseOutTime = 0;  // ease-out completato
+      marqueeStopping = true;  // inizia il buffer di stop
+    }
+  }
+  
+  // Buffer di stop: mantiene il marquee fermo brevemente dopo ease-out per evitare glitch
+  if (marqueeStopping) {
+    if ((performance.now() / 1000) - marqueeEaseOutTime < MARQUEE_STOP_BUFFER) {
+      marqueeSpeed = 0;  // velocità 0 durante il buffer
+    } else {
+      marqueeStopping = false;  // buffer completato
+    }
+  }
+  
+  // Applica la velocità (con easing se in fase di ease in/out)
+  if (marqueeActive || marqueeEaseOutTime > 0 || marqueeStopping) {
+    marqueeOffset += marqueeSpeed * dt;
+    // Wrap modulo GRID_W: la griglia contigua piastrella senza cuciture visibili.
+    for (const c of cards) {
+      c.position.x = ((c.userData.baseX - OX - marqueeOffset) % GRID_W + GRID_W) % GRID_W + OX;
+    }
+  }
+
   /* ── Frecce tastiera (solo navigazione normale) ── */
-  if (!zoomedMesh) {
+  if (!zoomedMesh && !marqueeActive && !marqueeStopping) {
     if (KEYS['ArrowLeft']  || KEYS['a'])
       camTargetX = clampX(camTargetX - CFG.NAV_STEP * 60 * dt);
     if (KEYS['ArrowRight'] || KEYS['d'])
       camTargetX = clampX(camTargetX + CFG.NAV_STEP * 60 * dt);
     if (KEYS['ArrowUp']    || KEYS['w'])
       camTargetY = clampY(camTargetY + CFG.NAV_STEP * 60 * dt);
-    if (KEYS['ArrowDown']  || KEYS['s'])
+    if (KEYS['ArrowDown'])   // 's' è ora riservato al marquee (vedi keydown)
       camTargetY = clampY(camTargetY - CFG.NAV_STEP * 60 * dt);
   }
 
   /* ── Inerzia drag (solo navigazione normale) — frame-rate independent ── */
-  if (!dragging && !zoomedMesh) {
+  if (!dragging && !zoomedMesh && !marqueeActive && !marqueeStopping) {
     const decay = Math.pow(CFG.INERTIA, dt * 60);
     velX      *= decay;
     velY      *= decay;
@@ -1533,11 +1671,14 @@ function animate() {
   camera.position.z = lerpDt(camera.position.z, camTargetZ, lz, dt);
 
 
-  /* ── Fluttuazione verticale (solo normale) ── */
-  if (!zoomedMesh) {
-    grp.position.y = Math.sin(clock.elapsedTime * Math.PI * 2 * CFG.FLOAT_SPD) * CFG.FLOAT_AMP;
+  /* ── Fluttuazione verticale (solo normale; ferma in zoom e in marquee) ── */
+  const floatValue = Math.sin(clock.elapsedTime * Math.PI * 2 * CFG.FLOAT_SPD) * CFG.FLOAT_AMP;
+  
+  if (!zoomedMesh && !marqueeActive && !marqueeStopping && marqueeEaseOutTime === 0) {
+    // Lerpa verso il valore attuale dell'oscillazione per una transizione fluida
+    grp.position.y = lerp(grp.position.y, floatValue, 0.1);
   } else {
-    grp.position.y = lerp(grp.position.y, 0, 0.1); // ferma il float
+    grp.position.y = lerp(grp.position.y, 0, 0.1); // ferma il float durante ease-out/stop
   }
 
   /* ── Hover scale ── */
