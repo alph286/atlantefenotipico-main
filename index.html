@@ -527,8 +527,26 @@ function imgLabelN(n) { return pad3(n); }
    Three.js — Renderer, Scene, Camera
    ══════════════════════════════════════════════════════════════ */
 const canvas   = document.getElementById('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: !isMobile,                                        // MSAA off su mobile: risparmia 20-40 MB VRAM
+  powerPreference: isMobile ? 'default' : 'high-performance'  // evita throttling termico su smartphone
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
+
+// Gestione perdita contesto WebGL (tipica su mobile in OOM): ricarica la pagina.
+canvas.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  document.body.innerHTML =
+    '<div style="position:fixed;inset:0;background:#06141b;display:flex;' +
+    'align-items:center;justify-content:center;color:#eafbff;font-family:system-ui;' +
+    'text-align:center;padding:2rem"><div>' +
+    '<p style="font-size:1.1rem;margin-bottom:1rem">Errore grafico</p>' +
+    '<p style="font-size:.8rem;opacity:.6">Tocca per ricaricare</p>' +
+    '</div></div>';
+  document.addEventListener('click',    () => location.reload(), { once: true });
+  document.addEventListener('touchend', () => location.reload(), { once: true });
+}, false);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setClearColor(0x06141b, 1);
 
@@ -723,9 +741,15 @@ function makeErrTex(url) {
 
 function onTexDone(plane, tex, url) {
   if (tex) {
+    // Disabilita mipmap per le miniature: risparmia ~33% VRAM (100MB → 100MB senza overhead)
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE.LinearFilter;
     plane.material.map = tex;
     plane.material.needsUpdate = true;
-    renderer.initTexture(tex);
+    // Su desktop: pre-upload immediato per evitare jank allo scroll.
+    // Su mobile: upload lazy (al primo render visibile) per non bloccare il main thread
+    // durante il batch-load delle 226 miniature.
+    if (!isMobile) renderer.initTexture(tex);
     plane.userData.thumbTex = tex;   // miniatura: resta in memoria, riusata al de-zoom
   } else {
     failedURLs.push(url);
@@ -736,10 +760,10 @@ function onTexDone(plane, tex, url) {
   }
   loadedN++;
   if (ldProgressRect) {
-    ldProgressRect.setAttribute('width', (1000 * loadedN / planes.length).toFixed(0));
+    ldProgressRect.setAttribute('width', (1000 * loadedN / LOAD_COUNT).toFixed(0));
   }
-  ldInfo.textContent = loadedN + ' / ' + planes.length;
-  if (loadedN >= planes.length) setTimeout(onAllLoaded, 300);
+  ldInfo.textContent = loadedN + ' / ' + LOAD_COUNT;
+  if (loadedN >= LOAD_COUNT) setTimeout(onAllLoaded, 300);
 }
 
 function onAllLoaded() {
@@ -748,11 +772,11 @@ function onAllLoaded() {
     return;
   }
   // ── Mostra diagnostica ──────────────────────────────────────────
-  const pct  = Math.round(failedURLs.length / TOTAL * 100);
+  const pct  = Math.round(failedURLs.length / LOAD_COUNT * 100);
   const ldEl = document.getElementById('loading');
 
   // Barra diventa rossa se tutto fallisce, arancione se parziale
-  ldBar.style.background = failedURLs.length === TOTAL ? '#f50508' : '#ee15ef';
+  ldBar.style.background = failedURLs.length === LOAD_COUNT ? '#f50508' : '#ee15ef';
 
   if (location.protocol === 'file:') {
     ldInfo.innerHTML =
@@ -808,10 +832,16 @@ function loadBatch(start) {
     const p = planes[i];
     let url;
 
-    if (p.userData.isPannellone) {
-      // Pannellone: cerca le dimensioni dal nome
+    if (p.userData.isPannellone && p.userData.side === 'back') {
+      // Retro pannellone: mai visibile (pannelloni non sono zoomabili né girabili)
+      continue;
+    } else if (p.userData.isPannellone) {
+      // Pannellone fronte: usa la miniatura 1/8 (da ~96-191 MB a ~1.5-3 MB VRAM)
       const pannello = PANNELLONI.find(pn => pn.name === p.userData.name);
-      url = `images/pannelloni/${p.userData.name} ${pannello.cols}x${pannello.rows}.webp`;
+      url = `thumbs/pannelloni/${p.userData.name} ${pannello.cols}x${pannello.rows}.jpg`;
+    } else if (p.userData.side === 'back') {
+      // Retro carta singola: caricato on-demand alla prima apertura (risparmia ~52 MB VRAM)
+      continue;
     } else {
       // Carta singola
       url = thumbSrcN(p.userData.file);
@@ -830,6 +860,11 @@ function loadBatch(start) {
   }
   if (end < planes.length) setTimeout(() => loadBatch(end), TEST ? 2 : CFG.BATCH_MS);
 }
+
+// Quante texture vengono caricate all'avvio:
+// fronti carte singole (113) + fronti pannelloni (4).
+// I retri carte singole sono on-demand; i retri pannelloni non vengono mai mostrati.
+const LOAD_COUNT = planes.filter(p => p.userData.side === 'front').length;
 
 // ── Rilevamento file:// prima ancora di iniziare ──────────────────────────
 if (location.protocol === 'file:') {
@@ -933,11 +968,37 @@ function loadFullRes(card) {
   for (const plane of card.userData.planes) loadPlaneFull(plane);  // fronte + retro
 }
 
+// Carica la miniatura del retro on-demand (solo alla prima apertura della carta).
+// I retri non vengono caricati all'avvio per risparmiare ~52 MB VRAM.
+function loadBackThumb(card) {
+  if (!card || !card.userData.planes) return;
+  const back = card.userData.planes[1];
+  if (!back || back.userData.isPannellone || back.userData.thumbTex || back.userData.thumbLoading) return;
+  back.userData.thumbLoading = true;
+  texLoader.load(
+    thumbSrcN(back.userData.file),
+    (tex) => {
+      back.userData.thumbLoading = false;
+      tex.generateMipmaps = false;
+      tex.minFilter = THREE.LinearFilter;
+      back.userData.thumbTex = tex;
+      // Aggiorna la map solo se il retro non sta già mostrando il full-res
+      if (!back.userData.fullTex) {
+        back.material.map = tex;
+        back.material.needsUpdate = true;
+      }
+    },
+    undefined,
+    () => { back.userData.thumbLoading = false; }
+  );
+}
+
 function releaseFullRes(card) {
   if (!card || !card.userData.planes) return;
   for (const plane of card.userData.planes) {
     if (!plane.userData.fullTex) continue;
-    plane.material.map = plane.userData.thumbTex;
+    // Fallback a phTex se il retro non è ancora stato caricato
+    plane.material.map = plane.userData.thumbTex || phTex;
     plane.material.needsUpdate = true;
     plane.userData.fullTex.dispose();
     plane.userData.fullTex = null;
@@ -962,7 +1023,8 @@ function zoomTo(mesh) {
 
   zoomedMesh = mesh;
   mesh.userData.flip = 0;          // si apre sempre sul fronte (presentazione)
-  loadFullRes(mesh);               // precarica fronte + retro
+  loadBackThumb(mesh);             // miniatura retro on-demand (se non ancora caricata)
+  loadFullRes(mesh);               // precarica fronte + retro full-res
   camTargetX = mesh.position.x;
   camTargetY = mesh.position.y;
   camTargetZ = fitZForMesh();
